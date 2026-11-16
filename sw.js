@@ -1,5 +1,5 @@
 /* Service worker: o app funciona sem internet depois da primeira visita. */
-const VERSION = 'cantai-v6';
+const VERSION = 'cantai-v7';
 const SHELL = [
   './',
   'index.html',
@@ -8,6 +8,7 @@ const SHELL = [
   'js/slides.js',
   'js/app.js',
   'vendor/pptxgen.bundle.js',
+  'vendor/acordes.json',
   'manifest.webmanifest',
   'icons/favicon.svg',
   'icons/icon-192.png',

@@ -75,7 +75,10 @@
     chama: '<path d="M12 3c.5 3.5 5 5.5 5 10.5a5 5 0 0 1-10 0c0-2.5 1.5-3.7 2.2-5.6.8 1 1.3 2 1.3 3.4C12 9.5 11 6.5 12 3z"/>',
     coroa: '<path d="M4 18h16M5 18 4 8l4.5 3.5L12 5l3.5 6.5L20 8l-1 10"/>',
     estrela: '<path d="m12 3.6 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9 6.8 19.6l1-5.8-4.2-4.1 5.8-.8z"/>',
-    nota: '<path d="M10 18V5l9-1.5"/><circle cx="7.5" cy="18" r="2.5"/>'
+    nota: '<path d="M10 18V5l9-1.5"/><circle cx="7.5" cy="18" r="2.5"/>',
+    maos: '<path d="M11 20.5V12L8.2 8.4a1.4 1.4 0 0 1 2.2-1.7L12 8.6l1.6-1.9a1.4 1.4 0 0 1 2.2 1.7L13 12v8.5"/><path d="M7 20.5h10"/><path d="M12 3v2"/>',
+    cruz: '<path d="M12 3v18M7 8h10"/><path d="M5 21h14"/>',
+    sol: '<circle cx="12" cy="13" r="4"/><path d="M12 3.5v2.5M5.3 6.3l1.8 1.8M18.7 6.3l-1.8 1.8M3 13h2.5M18.5 13H21"/><path d="M4 20h16"/>'
   };
   const ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ''}</svg>`;
   const catIc = n => `<svg viewBox="0 0 24 24" aria-hidden="true">${CAT_P[n] || CAT_P.nota}</svg>`;
@@ -386,10 +389,112 @@
     let html = esc(parts[0]);
     for (let i = 1; i < parts.length; i += 2) {
       const ch = C.transposeChord(parts[i], st, flat);
-      const m = (parts[i + 1] || '').match(/^(\S*)([\s\S]*)$/);
-      html += `<span class="cw" style="min-width:${(ch.length * 0.5 + 0.55).toFixed(2)}em"><b class="ch">${esc(ch)}</b>${m[1] ? esc(m[1]) : '&nbsp;'}</span>${esc(m[2])}`;
+      const seg = parts[i + 1] || '';
+      const m = seg.match(/^(\S*)([\s\S]*)$/);
+      // reserva espaço só quando o texto até o próximo acorde é curto demais para este acorde
+      const tight = i + 2 < parts.length ? seg.length < ch.length + 2 : !seg.trim();
+      const minW = tight ? ` style="min-width:${(ch.length * 0.55 + 0.45).toFixed(2)}em"` : '';
+      html += `<span class="cw"${minW}><b class="ch">${esc(ch)}</b>${m[1] ? esc(m[1]) : '&nbsp;'}</span>${esc(m[2])}`;
     }
     return `<div class="ln hc">${html}</div>`;
+  }
+
+  /* ---------- desenhos dos acordes (base aberta Open Guitar Chords) ---------- */
+  let SHAPES = null, shapesP = null;
+  function loadShapes() {
+    if (SHAPES) return Promise.resolve(SHAPES);
+    if (!shapesP) shapesP = fetch('vendor/acordes.json').then(r => r.json()).then(d => (SHAPES = d.acordes)).catch(() => { shapesP = null; return null; });
+    return shapesP;
+  }
+  const ENH = { Db: 'C#', 'D#': 'Eb', Gb: 'F#', 'G#': 'Ab', 'A#': 'Bb', Cb: 'B', Fb: 'E', 'E#': 'F', 'B#': 'C' };
+  /** Acha o desenho mais próximo: "A7M(9)" → Amaj7, "E7(9)" → E7, "Bb°" → Bbdim, "B/A" → B. */
+  function shapeFor(name) {
+    if (!SHAPES) return null;
+    if (SHAPES[name]) return { sym: name, ...SHAPES[name] };
+    const m = String(name).match(/^([A-G][#b]?)(.*?)(?:\/([A-G][#b]?))?$/);
+    if (!m) return null;
+    const root = ENH[m[1]] || m[1];
+    const bass = m[3] ? (ENH[m[3]] || m[3]) : '';
+    const q = m[2].replace(/[()]/g, '').replace(/[º°]/g, 'dim').replace(/7M|M7/, 'maj7');
+    const c = [];
+    if (bass) c.push(root + q + '/' + bass);
+    if (/^(m7b5|m7-5|ø)/.test(q)) c.push('m7b5', 'dim', 'm');
+    else if (/^dim/.test(q)) c.push('dim');
+    else if (/^(aug|\+)/.test(q)) c.push('aug', '');
+    else if (/^m(?!aj)/.test(q)) {
+      if (/^m7/.test(q)) c.push('m7');
+      if (/^m6/.test(q)) c.push('m6');
+      if (/^m9/.test(q)) c.push('m9', 'm7');
+      c.push('m');
+    } else {
+      if (/^maj7/.test(q)) c.push('maj7');
+      if (/^(7sus4|74)/.test(q)) c.push('7sus4', 'sus4', '7');
+      if (/^7/.test(q)) c.push('7');
+      if (/^6/.test(q)) c.push('6');
+      if (/^(sus2|2)/.test(q)) c.push('sus2');
+      if (/^(sus|4)/.test(q)) c.push('sus4');
+      if (/^(add)?9/.test(q)) c.push('add9');
+      if (/^5$/.test(q)) c.push('5');
+      c.push('');
+    }
+    for (const k of c) { const key = k.includes('/') ? k : root + k; if (SHAPES[key]) return { sym: key, ...SHAPES[key] }; }
+    return null;
+  }
+  function chordSVG(sh, big) {
+    const x0 = 11, y0 = 16, sx = 9, sy = 11, base = sh.o || 1, rel = f => f - base + 1;
+    let g = base === 1 ? `<rect x="${x0}" y="${y0 - 2.5}" width="${sx * 5}" height="2.5" class="nut"/>`
+      : `<text x="${x0 - 3}" y="${y0 + sy * 0.72}" class="bf" text-anchor="end">${base}</text>`;
+    for (let i = 0; i < 6; i++) g += `<line x1="${x0 + i * sx}" y1="${y0}" x2="${x0 + i * sx}" y2="${y0 + sy * 5}" class="st"/>`;
+    for (let j = 1; j <= 5; j++) g += `<line x1="${x0}" y1="${y0 + j * sy}" x2="${x0 + sx * 5}" y2="${y0 + j * sy}" class="fr"/>`;
+    for (const [fret, from, to] of sh.b) {
+      const y = y0 + (rel(fret) - 0.5) * sy;
+      g += `<rect x="${x0 + from * sx - 3.4}" y="${y - 3.4}" width="${(to - from) * sx + 6.8}" height="6.8" rx="3.4" class="dot"/>`;
+    }
+    sh.f.forEach((f, i) => {
+      const x = x0 + i * sx;
+      if (f === 'x') g += `<text x="${x}" y="${y0 - 5}" class="mk" text-anchor="middle">×</text>`;
+      else if (f === 0) g += `<circle cx="${x}" cy="${y0 - 7}" r="2.4" class="op"/>`;
+      else if (!sh.b.some(([bf, fr, to]) => bf === f && i >= fr && i <= to)) {
+        const y = y0 + (rel(f) - 0.5) * sy;
+        g += `<circle cx="${x}" cy="${y}" r="3.6" class="dot"/>`;
+        if (big && sh.d[i]) g += `<text x="${x}" y="${y + 1.9}" class="fg" text-anchor="middle">${sh.d[i]}</text>`;
+      }
+    });
+    return `<svg viewBox="0 0 66 76" class="cd" aria-hidden="true">${g}</svg>`;
+  }
+  /** Acordes da música, na ordem em que aparecem, já no tom escolhido. */
+  function songChords(s, st) {
+    const flat = C.useFlats(s.tom || C.firstChord(s.texto), st);
+    const seen = new Set(), out = [];
+    for (const m of C.normalizeSheet(s.texto).matchAll(/\[([^\]]+)\]/g)) {
+      const ch = C.transposeChord(m[1], st, flat);
+      if (C.isChordLine(m[1]) && !seen.has(ch)) { seen.add(ch); out.push(ch); }
+    }
+    return out;
+  }
+  function fillChordStrip(el, list) {
+    loadShapes().then(() => {
+      if (!el.isConnected) return;
+      el.innerHTML = list.map(ch => {
+        const sh = shapeFor(ch);
+        return `<button class="cbox" data-ch="${esc(ch)}"><b>${esc(ch)}</b>${sh ? chordSVG(sh) : '<span class="cna">sem desenho</span>'}</button>`;
+      }).join('');
+      $$('[data-ch]', el).forEach(b => b.onclick = () => showChord(b.dataset.ch));
+    });
+  }
+  function showChord(name) {
+    loadShapes().then(() => {
+      const sh = shapeFor(name);
+      const pop = document.createElement('div');
+      pop.className = 'chord-pop';
+      pop.innerHTML = `<div class="cp-card" role="dialog" aria-label="Acorde ${esc(name)}">
+        <b>${esc(name)}</b>
+        ${sh ? `${chordSVG(sh, true)}${sh.sym !== name ? `<small>Desenho de ${esc(sh.sym)} (forma mais próxima)</small>` : ''}` : '<p>Sem desenho para este acorde.</p>'}
+        <small class="cp-src">Diagramas: Open Guitar Chords</small>
+        <button class="btn small block">Fechar</button></div>`;
+      pop.onclick = e => { if (e.target === pop || e.target.closest('button')) pop.remove(); };
+      document.body.appendChild(pop);
+    });
   }
 
   function renderSongBody(s, mode, st) {
@@ -478,6 +583,8 @@
           <div class="tool icon"><button data-act="paper" aria-label="Alternar fundo da leitura">${ic(settings().papel === 'escuro' ? 'sun' : 'moon', 'sm')}</button></div>
           <div class="tool icon"><button data-act="fav" aria-label="Favoritar" aria-pressed="${isFav(s.id)}">${isFav(s.id) ? `<svg class="i sm fill fav-on" viewBox="0 0 24 24">${P.star}</svg>` : ic('star', 'sm')}</button></div>
         </div>
+        ${mode === 'cifra' ? `<div class="cstrip-head"><span>Acordes</span><button data-act="diag">${settings().diag === false ? 'Mostrar desenhos' : 'Ocultar desenhos'}</button></div>
+          ${settings().diag === false ? '' : '<div class="cstrip" data-cstrip></div>'}` : ''}
         <article class="paper ${mode === 'letra' ? 'lyrics' : ''} ${settings().papel === 'escuro' ? 'dark' : ''}" style="--fs:${settings().fs}px">
           ${renderSongBody(s, mode, st)}
           <div class="src">${s.autor ? esc(s.autor) + ' · ' : ''}${esc(s.fonte || (isUser(s) ? 'Cadastrada por você' : ''))}</div>
@@ -513,6 +620,12 @@
           if (fav) fav.onclick = () => { toast(toggleFav(s.id) ? 'Adicionada às favoritas' : 'Removida das favoritas'); refresh(); };
           const paste = $('[data-act="pastechords"]', wrap);
           if (paste) paste.onclick = () => pasteChords(s, paste);
+          const diag = $('[data-act="diag"]', wrap);
+          if (diag) diag.onclick = () => { setSettings({ diag: settings().diag === false }); refresh(); };
+          // toque num acorde da cifra: mostra o desenho
+          $$('.paper .ch', wrap).forEach(ch => ch.onclick = () => showChord(ch.textContent));
+          const strip = $('[data-cstrip]', wrap);
+          if (strip) fillChordStrip(strip, songChords(s, st));
         };
         const refresh = () => { wrap.innerHTML = body(); bind(); };
         bind();

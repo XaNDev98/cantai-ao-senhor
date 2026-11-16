@@ -10,6 +10,8 @@ Funciona no navegador do celular, pode ser **instalado na tela inicial** e conti
 - **Cifra para qualquer música**: quando a música ainda não tem cifra, a aba **Cifra** mostra uma tela limpa para salvá-la uma vez: copie a cifra (de onde quiser) e toque em “Colar cifra copiada”. A partir daí ela abre sempre no app, só letra e acordes, com troca de tom, PPT e sem internet.
 - **Categorias** na ordem da missa: Entrada, Ato Penitencial, Glória, Aclamação, Ofertório, Santo, Cordeiro, Comunhão, Pós-Comunhão, Final, Marianos, Natal…
 - **Letra ou cifra**, com acordes alinhados sobre as sílabas, **transposição de tom**, ajuste do tamanho da letra e leitura clara/escura.
+- **Desenhos dos acordes**: faixa com os acordes da música (já no tom escolhido) e toque em qualquer acorde para ver como montar no violão. Diagramas da base aberta [Open Guitar Chords](https://openguitarchords.com) (uso livre), em `vendor/acordes.json` — regerar com `node tools/build-acordes.mjs`.
+- **Acervo com 41 cantos**, 25 com cifra, cobrindo todos os momentos da missa e os tempos litúrgicos (Advento, Natal, Quaresma, Páscoa).
 - **Converter para PPT**: slides 16:9 com fundos nas **cores do tempo litúrgico**, fundo simples (preto/branco/azul) ou **foto própria**; refrão repetido automaticamente após cada estrofe; linhas por slide ajustáveis.
 - **Repertório da Missa**: monte a sequência de cantos e gere **um único PPT** com todos.
 - **Modo apresentação** em tela cheia direto do celular/tablet (toque ou setas do teclado para avançar).
