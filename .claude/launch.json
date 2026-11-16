@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cantai",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/serve.mjs", "8140"],
+      "port": 8140
+    }
+  ]
+}
