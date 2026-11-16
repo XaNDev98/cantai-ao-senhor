@@ -180,6 +180,9 @@ svg.i.fill { fill: currentColor; }
 .oe-text .oe-r { font-weight: 600; }
 .oe-text .oe-r b, .oe-text .oe-v b { color: var(--paper-chord); }
 .cat-ico.off { opacity: .55; }
+.oe-file { cursor: pointer; background: #fff !important; color: var(--paper-ink) !important; border-color: #ddd5c3 !important; }
+.oe-file .i { color: #8a6420; }
+.oe-ok { margin: 14px 16px 0; padding: 12px 14px; border-radius: 13px; background: rgba(214, 178, 110, .1); border: 1px solid var(--line); color: var(--gold-2); font-weight: 600; font-size: 14px; display: flex; gap: 8px; align-items: center; }
 .hscroll { display: flex; gap: 10px; overflow-x: auto; padding: 0 16px 6px; scroll-snap-type: x mandatory; scrollbar-width: none; }
 .hscroll::-webkit-scrollbar { display: none; }
 .mini { flex: none; width: 150px; scroll-snap-align: start; padding: 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--line-soft); }

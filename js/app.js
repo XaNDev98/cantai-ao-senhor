@@ -1014,6 +1014,18 @@
     toast(`${oe.nome} salva (${oeCount()} de ${ORACOES.length})`);
     render();
   }
+  /** Arquivo .json { oracoes: { "I": "texto", "DC-II": "texto", ... } } guardado no aparelho. */
+  async function importOEFile(file) {
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      const src = data && (data.oracoes || data);
+      let n = 0;
+      for (const o of ORACOES) if (typeof src[o.id] === 'string' && saveOE(o.id, src[o.id])) n++;
+      toast(n ? `${n} ${n === 1 ? 'oração importada' : 'orações importadas'}` : 'Nenhuma oração encontrada no arquivo');
+      render();
+    } catch { toast('Arquivo inválido'); }
+  }
   function renderOE(txt) {
     return txt.split(/\n{2,}/).map(par => `<p>${par.split('\n').map(l => {
       // V. / R. / T. (com ponto) e CP / CC / C1… (celebrante principal, concelebrantes)
@@ -1042,15 +1054,19 @@
             <a class="btn small" href="${OE_SITE}" target="_blank" rel="noopener">${ic('search', 'sm')} Abrir o site</a>
             ${canClip ? `<button class="btn small gold" data-act="oepaste">${ic('paste', 'sm')} Colar oração copiada</button>` : ''}
           </div>
+          <label class="btn small block oe-file">${ic('upload', 'sm')} Importar arquivo de orações (.json)<input type="file" accept=".json,application/json" hidden data-act="oefile"></label>
           <small>Feito uma vez, a oração fica no seu aparelho e abre aqui, limpa e sem internet.</small>
-        </div>` : ''}
+        </div>` : `<div class="oe-ok">${ic('check', 'sm')} As ${ORACOES.length} orações estão salvas neste aparelho.</div>`}
         <ul class="list">${ORACOES.map(o => {
           const ok = !!oeText(o.id);
           return `<li><a class="row" href="#/oracoes/${o.id}">
           <span class="cat-ico ${ok ? '' : 'off'}">${ok ? ic('check') : catIc('calice')}</span>
           <span class="body"><b>${esc(o.nome)}</b><span class="sub">${ok ? 'Salva no app' : esc(o.sub || 'Ainda não salva')}</span></span>${ic('chev', 'sm chev')}</a></li>`;
         }).join('')}</ul>`,
-        after(el) { const b = $('[data-act="oepaste"]', el); if (b) b.onclick = () => pasteOE(null); }
+        after(el) {
+          const b = $('[data-act="oepaste"]', el); if (b) b.onclick = () => pasteOE(null);
+          const f = $('[data-act="oefile"]', el); if (f) f.onchange = e => importOEFile(e.target.files[0]);
+        }
       };
     }
     const i = ORACOES.indexOf(oe), prev = ORACOES[i - 1], next = ORACOES[i + 1];
