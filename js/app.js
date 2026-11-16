@@ -307,6 +307,7 @@
         <a class="tile" href="#/converter">${ic('slides')}<span><strong>Converter para PPT</strong><small>Slides prontos</small></span></a>
         <a class="tile" href="#/repertorio">${ic('list')}<span><strong>Repertório</strong><small>Monte a missa</small></span>${n ? `<span class="count">${n}</span>` : ''}</a>
         <a class="tile" href="#/favoritos">${ic('star')}<span><strong>Favoritas</strong><small>${favs().length || 'Nenhuma'} ${favs().length === 1 ? 'música' : favs().length ? 'músicas' : 'ainda'}</small></span></a>
+        <a class="tile wide" href="#/oracoes"><span class="cat-ico">${catIc('calice')}</span><span><strong>Orações Eucarísticas</strong><small>I a V, diversas circunstâncias, com crianças e reconciliação</small></span>${ic('chev', 'sm')}</a>
       </section>
       ${h.length ? `<div class="sec-title">Vistas recentemente <a href="#/historico">Ver tudo</a></div>
       <div class="hscroll">${h.map(s => `<a class="mini" href="#/musica/${encodeURIComponent(s.id)}"><span class="thumb ${thumbCls(s)}" style="width:100%">${CROSS_THUMB}</span><b>${esc(s.titulo)}</b><span>${esc(catOf(s.categoria).nome)}</span></a>`).join('')}</div>` : ''}
@@ -940,6 +941,57 @@
     };
   };
 
+  /* ---------- Orações Eucarísticas ----------
+   * O texto é a tradução oficial do Missal Romano (protegida por direito autoral),
+   * por isso não é copiado para o app: a página do site Católico Orante, que
+   * permite ser incorporada, é exibida dentro do app, já na oração escolhida. */
+  const OE_SITE = 'https://www.catolicoorante.com.br/oeucaristicas.html';
+  const ORACOES = [
+    { id: 'I', nome: 'Oração Eucarística I', sub: 'Cânon Romano' },
+    { id: 'II', nome: 'Oração Eucarística II', sub: 'A mais breve; dias de semana' },
+    { id: 'III', nome: 'Oração Eucarística III', sub: 'Domingos e festas' },
+    { id: 'IV', nome: 'Oração Eucarística IV', sub: 'Prefácio próprio; história da salvação' },
+    { id: 'V', nome: 'Oração Eucarística V', sub: 'Congresso Eucarístico de Manaus' },
+    { id: 'DC-I', nome: 'Diversas Circunstâncias I', sub: 'A Igreja a caminho da unidade' },
+    { id: 'DC-II', nome: 'Diversas Circunstâncias II', sub: 'Deus conduz a Igreja pelo caminho da salvação' },
+    { id: 'DC-III', nome: 'Diversas Circunstâncias III', sub: 'Jesus, caminho para o Pai' },
+    { id: 'DC-IV', nome: 'Diversas Circunstâncias IV', sub: 'Jesus que passa fazendo o bem' },
+    { id: 'CC-I', nome: 'Com Crianças I', sub: '' },
+    { id: 'CC-II', nome: 'Com Crianças II', sub: '' },
+    { id: 'CC-III', nome: 'Com Crianças III', sub: '' },
+    { id: 'R-I', nome: 'Sobre a Reconciliação I', sub: '' },
+    { id: 'R-II', nome: 'Sobre a Reconciliação II', sub: '' }
+  ];
+
+  views.oracoes = ([id]) => {
+    const oe = ORACOES.find(o => o.id === id);
+    if (!oe) {
+      return {
+        tab: '',
+        html: `${topbar('Orações Eucarísticas')}
+        <ul class="list">${ORACOES.map(o => `<li><a class="row" href="#/oracoes/${o.id}">
+          <span class="cat-ico">${catIc('calice')}</span>
+          <span class="body"><b>${esc(o.nome)}</b>${o.sub ? `<span class="sub">${esc(o.sub)}</span>` : ''}</span>${ic('chev', 'sm chev')}</a></li>`).join('')}</ul>
+        <p class="about">Texto do Missal Romano, exibido do site <b>Católico Orante</b>. É preciso estar conectado à internet.</p>`
+      };
+    }
+    const i = ORACOES.indexOf(oe), prev = ORACOES[i - 1], next = ORACOES[i + 1];
+    return {
+      tab: '',
+      html: `${topbar(oe.nome)}
+      <div class="oe-wrap">
+        <iframe class="oe-frame" src="${OE_SITE}#${oe.id}" title="${esc(oe.nome)}"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-modals"
+          referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <div class="oe-foot">
+          ${prev ? `<a class="btn small" href="#/oracoes/${prev.id}">${ic('back', 'sm')} ${esc(prev.id)}</a>` : '<span></span>'}
+          <small>Texto: Missal Romano · via Católico Orante</small>
+          ${next ? `<a class="btn small" href="#/oracoes/${next.id}">${esc(next.id)} ${ic('chev', 'sm')}</a>` : '<span></span>'}
+        </div>
+      </div>`
+    };
+  };
+
   views.favoritos = () => {
     const list = favs().map(getSong).filter(Boolean);
     return {
@@ -1038,6 +1090,7 @@
         <a href="#/nova">${ic('plus')}<span>Adicionar música<small>Cadastre os cantos da sua comunidade</small></span>${ic('chev', 'sm')}</a>
         <a href="#/minhas">${ic('folder')}<span>Minhas músicas<small>${n} ${n === 1 ? 'cadastrada' : 'cadastradas'} neste aparelho</small></span>${ic('chev', 'sm')}</a>
         <a href="#/colar">${ic('paste')}<span>Colar letra e gerar PPT</span>${ic('chev', 'sm')}</a>
+        <a href="#/oracoes">${ic('cross')}<span>Orações Eucarísticas</span>${ic('chev', 'sm')}</a>
         <a href="#/historico">${ic('clock')}<span>Histórico</span>${ic('chev', 'sm')}</a>
         <a href="#/buscar">${ic('search')}<span>Buscar</span>${ic('chev', 'sm')}</a>
       </div>
