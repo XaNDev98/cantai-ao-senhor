@@ -140,7 +140,8 @@
   }
   const tidy = t => String(t || '').replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
   const webToSong = x => ({
-    id: 'web-' + x.id, titulo: x.trackName || x.name || 'Sem título', autor: x.artistName || '', album: x.albumName || '',
+    id: 'web-' + x.id, titulo: x.trackName || x.name || 'Sem título', autor: x.artistName || '',
+    album: /^(null|undefined|-)?$/i.test(String(x.albumName || '').trim()) ? '' : String(x.albumName).trim(),
     categoria: 'outros', fonte: 'Letra: LRCLIB (lrclib.net)', idioma: 'pt', texto: tidy(x.plainLyrics)
   });
   const webCache = new Map();
