@@ -996,7 +996,16 @@
     }
     // links de navegação do site no fim (ex.: "Rito da Comunhão")
     while (out.length && (!out[out.length - 1] || /^(rito da comunh[aã]o|ritos? finais|pr[oó]xim[oa]|anterior)$/i.test(out[out.length - 1]))) out.pop();
-    return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    return joinStanzas(out.join('\n'));
+  }
+  /** Sites que põem cada linha num parágrafo: 1 linha em branco = quebra de linha; 2+ = nova estrofe. */
+  function joinStanzas(t) {
+    const blocks = t.split(/\n{2,}/).filter(b => b.trim());
+    const singles = blocks.filter(b => !b.includes('\n')).length;
+    if (blocks.length > 8 && singles / blocks.length > 0.7) {
+      t = t.replace(/\n{3,}/g, '\u0000').replace(/\n\n/g, '\n').replace(/\u0000/g, '\n\n');
+    }
+    return t.replace(/\n{3,}/g, '\n\n').trim();
   }
   function saveOE(id, txt) {
     const clean = cleanOE(txt);
