@@ -43,14 +43,16 @@
   }
 
   /* ------------- texto colado no formato "acorde acima da letra" ------------- */
+  // "(G)" -> "G", mas "G7M(9)" continua igual
+  const unwrap = t => /^\(.*\)$/.test(t) ? t.slice(1, -1) : t;
   function isChordLine(line) {
     const toks = line.trim().split(/\s+/).filter(t => t && !/^[|\-–%]+$/.test(t) && !/^\(?\d+x\)?$/i.test(t));
     if (!toks.length) return false;
-    return toks.every(t => CHORD_RE.test(t.replace(/^\(|\)$/g, '')));
+    return toks.every(t => CHORD_RE.test(unwrap(t)));
   }
 
   function inlineChords(chordLine) {
-    return chordLine.trim().split(/\s+/).map(t => CHORD_RE.test(t.replace(/^\(|\)$/g, '')) ? `[${t.replace(/^\(|\)$/g, '')}]` : t).join(' ');
+    return chordLine.trim().split(/\s+/).map(t => CHORD_RE.test(unwrap(t)) ? `[${unwrap(t)}]` : t).join(' ');
   }
 
   function mergeChordLine(chordLine, lyric) {
@@ -60,9 +62,15 @@
     const maxPos = marks.length ? marks[marks.length - 1].pos : 0;
     if (out.length < maxPos) out = out.padEnd(maxPos, ' ');
     for (let k = marks.length - 1; k >= 0; k--) {
-      const { tok, pos } = marks[k];
-      const c = tok.replace(/^\(|\)$/g, '');
+      const { tok } = marks[k];
+      let { pos } = marks[k];
+      const c = unwrap(tok);
       if (!CHORD_RE.test(c)) continue;
+      // acorde caiu num espaço (cifra levemente desalinhada): encosta na próxima sílaba
+      if (out[pos] === ' ' && pos > 0 && out[pos - 1] !== ' ') {
+        const nx = out.slice(pos).search(/\S/);
+        if (nx > 0 && nx <= 2) pos += nx;
+      }
       out = out.slice(0, pos) + `[${c}]` + out.slice(pos);
     }
     return out.replace(/\s+$/, '').replace(/^\s+/, '');

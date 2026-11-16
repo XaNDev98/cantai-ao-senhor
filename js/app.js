@@ -123,9 +123,52 @@
   /* ---------------- dados ---------------- */
   const userSongs = () => store.get('userSongs', []);
   const allSongs = () => [...window.SONGS, ...userSongs()];
-  const getSong = id => allSongs().find(s => s.id === id);
+  const webSongs = () => store.get('webSongs', {});
+  const getSong = id => allSongs().find(s => s.id === id) || webSongs()[id];
   const catOf = id => CATS.find(c => c.id === id) || { id: 'outros', nome: 'Outros Cantos', icon: 'nota' };
   const isUser = s => s && String(s.id).startsWith('u-');
+  const isWeb = s => s && String(s.id).startsWith('web-');
+
+  /* ---------------- letras da internet (LRCLIB — lrclib.net) ---------------- */
+  const LRCLIB = 'https://lrclib.net/api';
+  function saveWebSong(s) {
+    const m = webSongs();
+    delete m[s.id]; m[s.id] = s;
+    const keys = Object.keys(m);
+    while (keys.length > 150) delete m[keys.shift()];
+    store.set('webSongs', m);
+  }
+  const tidy = t => String(t || '').replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+  const webToSong = x => ({
+    id: 'web-' + x.id, titulo: x.trackName || x.name || 'Sem título', autor: x.artistName || '', album: x.albumName || '',
+    categoria: 'outros', fonte: 'Letra: LRCLIB (lrclib.net)', idioma: 'pt', texto: tidy(x.plainLyrics)
+  });
+  const webCache = new Map();
+  async function webSearch(q) {
+    const k = norm(q).trim();
+    if (webCache.has(k)) return webCache.get(k);
+    const r = await fetch(`${LRCLIB}/search?q=${encodeURIComponent(q)}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const seen = new Set(), out = [];
+    for (const x of await r.json()) {
+      if (x.instrumental || !x.plainLyrics || !x.plainLyrics.trim()) continue;
+      const key = norm(x.artistName).replace(/[^a-z0-9]/g, '').slice(0, 10) + '|' +
+        norm(x.trackName).replace(/\(.*?\)|\[.*?\]|ao vivo|live|-.*$/g, '').replace(/[^a-z0-9]/g, '');
+      if (seen.has(key)) continue;
+      seen.add(key); out.push(webToSong(x));
+      if (out.length >= 20) break;
+    }
+    webCache.set(k, out);
+    return out;
+  }
+  async function webGet(id) {
+    const r = await fetch(`${LRCLIB}/get/${encodeURIComponent(String(id).replace(/^web-/, ''))}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const x = await r.json();
+    if (!x.plainLyrics) throw new Error('Letra indisponível');
+    return webToSong(x);
+  }
+  const chordSearchURL = s => 'https://www.google.com/search?q=' + encodeURIComponent(`cifra ${s.titulo} ${s.autor || ''}`.trim());
   const songHasChords = s => C.hasChords(s.texto);
 
   const favs = () => store.get('favs', []);
@@ -210,13 +253,15 @@
       ${right != null ? right : `<a class="ib" href="#/" aria-label="Início">${ic('home')}</a>`}
     </header>`;
   }
-  const thumbCls = s => isUser(s) ? 'user' : s.idioma === 'la' ? 'lat' : '';
-  function songRow(s, extra = '') {
+  const thumbCls = s => isWeb(s) ? 'web' : isUser(s) ? 'user' : s.idioma === 'la' ? 'lat' : '';
+  function songRow(s, extra = '', attrs = '') {
     const c = catOf(s.categoria);
     const tags = (songHasChords(s) ? `<span class="badge">CIFRA</span>` : '') + (s.idioma === 'la' ? `<span class="badge">LATIM</span>` : '');
-    return `<li><a class="row" href="#/musica/${encodeURIComponent(s.id)}">
+    const sub = isWeb(s) ? esc(s.autor || 'Internet') + (s.album && norm(s.album) !== norm(s.titulo) ? ' · ' + esc(s.album) : '')
+      : esc(c.nome) + (s.autor ? ' · ' + esc(s.autor) : '');
+    return `<li><a class="row" href="#/musica/${encodeURIComponent(s.id)}" ${attrs}>
       <span class="thumb ${thumbCls(s)}">${CROSS_THUMB}</span>
-      <span class="body"><b>${esc(s.titulo)}${tags}</b><span class="sub">${esc(c.nome)}${s.autor ? ' · ' + esc(s.autor) : ''}</span>${extra}</span>
+      <span class="body"><b>${esc(s.titulo)}${tags}</b><span class="sub">${sub}</span>${extra}</span>
       ${ic('chev', 'sm chev')}</a></li>`;
   }
   function emptyState(icon, title, text, action = '') {
@@ -240,7 +285,7 @@
           <p class="tag">Letras e cifras para a Missa</p>
           <form class="search-pill" role="search" data-search>
             ${ic('search')}
-            <input type="search" name="q" placeholder="Buscar músicas, trechos…" enterkeyhint="search" autocomplete="off" aria-label="Buscar músicas">
+            <input type="search" name="q" placeholder="Buscar qualquer música…" enterkeyhint="search" autocomplete="off" aria-label="Buscar músicas">
             <button class="go" aria-label="Buscar">${ic('chev', 'sm')}</button>
           </form>
         </div>
@@ -261,6 +306,7 @@
     const termo = q.get('q') || '';
     const filtro = q.get('f') || 'todas';
     const res = search(termo, filtro);
+    const webOk = filtro === 'todas' || filtro === 'letra';
     const chips = [['todas', 'Todas'], ['cifra', 'Com cifra'], ['letra', 'Só letra'], ['latim', 'Latim']];
     return {
       tab: '',
@@ -271,14 +317,32 @@
         ${termo ? `<button type="button" class="ib" data-act="clear-search" aria-label="Limpar">${ic('x', 'sm')}</button>` : ''}
       </form>
       <div class="chips" role="tablist">${chips.map(([k, l]) => `<button class="chip ${filtro === k ? 'on' : ''}" data-filter="${k}" role="tab" aria-selected="${filtro === k}">${l}</button>`).join('')}</div>
-      <div class="hint">${res.length} ${res.length === 1 ? 'música' : 'músicas'}${termo ? ` para “${esc(termo)}”` : ''}</div>
-      ${res.length ? `<ul class="list">${res.map(r => songRow(r.s, r.snip ? `<span class="snip">…${r.snip}…</span>` : '')).join('')}</ul>`
-        : emptyState('search', 'Nada encontrado', 'Tente outra palavra ou cadastre a música você mesmo.', `<a class="btn gold" href="#/nova">${ic('plus')} Adicionar música</a>`)}`,
+      ${!termo ? `<div class="hint">Digite o nome ou um trecho de <b>qualquer música</b>: buscamos no acervo e na internet.</div>` : ''}
+      ${res.length ? `<div class="sec-title">${termo ? 'No acervo' : 'Acervo'} <span>${res.length}</span></div>
+        <ul class="list">${res.map(r => songRow(r.s, r.snip ? `<span class="snip">…${r.snip}…</span>` : '')).join('')}</ul>` : ''}
+      ${termo && webOk ? `<div class="sec-title">Na internet <span class="src-tag">LRCLIB</span></div><div id="webres"><div class="hint loading"><span class="spin"></span> Buscando letras…</div></div>` : ''}
+      ${termo && !webOk && !res.length ? emptyState('search', 'Nada encontrado', 'Tente outra palavra ou cadastre a música você mesmo.', `<a class="btn gold" href="#/nova">${ic('plus')} Adicionar música</a>`) : ''}`,
       after(el) {
         $$('[data-filter]', el).forEach(b => b.onclick = () => go(`#/buscar?q=${encodeURIComponent(termo)}&f=${b.dataset.filter}`, true));
         const clr = $('[data-act="clear-search"]', el);
         if (clr) clr.onclick = () => go(`#/buscar?f=${filtro}`, true);
         if (!termo) setTimeout(() => $('input', el).focus(), 50);
+        const box = $('#webres', el);
+        if (!box) return;
+        webSearch(termo).then(list => {
+          if (!box.isConnected) return;
+          if (!list.length) {
+            box.innerHTML = res.length ? `<div class="hint">Nenhuma letra encontrada na internet para “${esc(termo)}”.</div>`
+              : emptyState('search', 'Nada encontrado', 'Confira a grafia, tente o nome do cantor junto (ex.: “segura na mão de Deus marcelo rossi”) ou cadastre a música.', `<a class="btn gold" href="#/nova">${ic('plus')} Adicionar música</a>`);
+            return;
+          }
+          box.innerHTML = `<ul class="list">${list.map((s, i) => songRow(s, '', `data-web="${i}"`)).join('')}</ul>`;
+          $$('[data-web]', box).forEach(a => a.addEventListener('click', () => saveWebSong(list[Number(a.dataset.web)])));
+        }).catch(() => {
+          if (!box.isConnected) return;
+          box.innerHTML = `<div class="hint">${navigator.onLine === false ? 'Sem conexão com a internet' : 'Não foi possível buscar na internet agora'} — mostrando só o acervo. <button class="link" data-act="retry">Tentar de novo</button></div>`;
+          $('[data-act="retry"]', box).onclick = () => render();
+        });
       }
     };
   };
@@ -332,6 +396,16 @@
 
   views.musica = ([id]) => {
     const s = getSong(id);
+    if (!s && String(id).startsWith('web-')) {
+      return {
+        tab: '',
+        html: `${topbar('Música')}<div class="empty"><span class="spin" style="display:inline-block;color:var(--gold)"></span><p style="margin-top:14px">Carregando a letra…</p></div>`,
+        after(el) {
+          webGet(id).then(song => { saveWebSong(song); if (parseHash().args[0] === id) render(); })
+            .catch(() => { if (el.isConnected) el.innerHTML = `${topbar('Música')}${emptyState('music', 'Não foi possível carregar a letra', 'Verifique a conexão com a internet e tente de novo.', `<a class="btn" href="#/buscar">Buscar outra música</a>`)}`; $$('[data-act="back"]', el).forEach(b => b.onclick = () => history.back()); });
+        }
+      };
+    }
     if (!s) return { tab: '', html: `${topbar('Música')}${emptyState('music', 'Música não encontrada', 'Ela pode ter sido removida deste aparelho.', `<a class="btn" href="#/">Voltar ao início</a>`)}` };
     pushHist(s.id);
     const chords = songHasChords(s);
@@ -363,7 +437,7 @@
       tab: '',
       html: `<div class="song-hero ${s.idioma === 'la' ? 'lat' : ''}">${SONG_ART}
         <div class="tb"><button class="ib" data-act="back" aria-label="Voltar">${ic('back')}</button><a class="ib" href="#/" aria-label="Início">${ic('home')}</a></div>
-        <div class="meta"><h2>${esc(s.titulo)}</h2><span>${esc(c.nome)}${s.idioma === 'la' ? '<span class="dot">•</span>Latim' : ''}</span></div>
+        <div class="meta"><h2>${esc(s.titulo)}</h2><span>${isWeb(s) ? esc(s.autor || 'Internet') : esc(c.nome)}${s.idioma === 'la' ? '<span class="dot">•</span>Latim' : ''}</span></div>
       </div>
       <div id="songbody">${body()}</div>
       <div class="actions">
@@ -374,6 +448,8 @@
           <button class="btn stack" data-act="share">${ic('share')}Compartilhar</button>
         </div>
         ${isUser(s) ? `<div class="row3" style="grid-template-columns:1fr 1fr"><a class="btn small" href="#/editar/${encodeURIComponent(s.id)}">${ic('edit', 'sm')} Editar</a><button class="btn small danger" data-act="del">${ic('trash', 'sm')} Excluir</button></div>`
+          : isWeb(s) ? `<div class="web-note">${ic('info', 'sm')}<span>Letra encontrada na internet. Para tocar, procure a cifra e cole em “Adicionar cifra”: ela fica salva no seu acervo.</span></div>
+            <div class="row3" style="grid-template-columns:1fr 1fr"><a class="btn small" href="${chordSearchURL(s)}" target="_blank" rel="noopener">${ic('search', 'sm')} Procurar cifra</a><a class="btn small" href="#/nova?base=${encodeURIComponent(s.id)}">${ic('music', 'sm')} Adicionar cifra</a></div>`
           : `<a class="btn small" href="#/nova?base=${encodeURIComponent(s.id)}">${ic('edit', 'sm')} Criar uma cópia editável</a>`}
       </div>`,
       after(el) {
@@ -748,10 +824,12 @@
 
   function editorView(existing, q) {
     const base = q && q.get('base') ? getSong(q.get('base')) : null;
-    const s = existing || (base ? { ...base, titulo: base.titulo + ' (minha versão)' } : { titulo: '', categoria: (q && q.get('cat')) || 'entrada', tom: '', autor: '', texto: '' });
+    const fromWeb = !existing && isWeb(base);
+    const s = existing || (base ? { ...base, titulo: fromWeb ? base.titulo : base.titulo + ' (minha versão)' } : { titulo: '', categoria: (q && q.get('cat')) || 'entrada', tom: '', autor: '', texto: '' });
     return {
       tab: '',
-      html: `${topbar(existing ? 'Editar música' : 'Nova música')}
+      html: `${topbar(existing ? 'Editar música' : fromWeb ? 'Adicionar cifra' : 'Nova música')}
+      ${fromWeb ? `<div class="web-note" style="margin:14px 16px 0">${ic('info', 'sm')}<span>Copie a cifra de um site (<a href="${chordSearchURL(base)}" target="_blank" rel="noopener">procurar cifra</a>), apague a letra abaixo e cole a cifra inteira. Os acordes que ficam na linha de cima são encaixados automaticamente.</span></div>` : ''}
       <form class="form" id="f">
         <div class="field"><label for="t">Título</label><input id="t" name="titulo" value="${esc(s.titulo)}" required></div>
         <div class="two">
@@ -769,7 +847,11 @@
           e.preventDefault();
           if (!f.texto.value.trim()) return toast('Escreva a letra');
           const saved = saveUserSong({ titulo: f.titulo.value, categoria: f.categoria.value, tom: f.tom.value, autor: f.autor.value, texto: f.texto.value }, existing && existing.id);
-          toast('Música salva');
+          if (fromWeb) { // a versão salva substitui a da internet no repertório e nas favoritas
+            setRep(rep().map(r => r.id === base.id ? { ...r, id: saved.id } : r));
+            store.set('favs', favs().map(x => x === base.id ? saved.id : x));
+          }
+          toast(fromWeb ? 'Salva no seu acervo' : 'Música salva');
           go('#/musica/' + encodeURIComponent(saved.id), true);
         };
       }
@@ -804,7 +886,7 @@
       <div class="menu"><button data-act="install">${ic('install')}<span>Instalar no celular<small>Abre como app e funciona sem internet</small></span></button></div>`}
       <div class="about">
         <p><b>Cantai ao Senhor</b> — letras e cifras para a liturgia, com geração de slides para projeção.</p>
-        <p>O acervo inclui apenas textos em domínio público (hinos tradicionais e latinos) e letras originais escritas para o app. Cantos de autores e editoras atuais são protegidos por direitos autorais: cadastre-os para uso da sua comunidade a partir dos seus folhetos e livros de canto — eles ficam só no seu aparelho.</p>
+        <p>O acervo próprio inclui textos em domínio público (hinos tradicionais e latinos) e letras originais escritas para o app. A busca na internet usa a base aberta de letras <b>LRCLIB</b> (lrclib.net); as letras pertencem aos seus autores e são exibidas para uso litúrgico da comunidade. Cifras podem ser coladas de sites de cifra e ficam salvas só no seu aparelho.</p>
         <p style="opacity:.7">Versão 1.0</p>
       </div>`,
       after(el) {
@@ -884,5 +966,11 @@
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    // versão nova instalada: recarrega uma vez para usá-la
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController && !reloaded && !document.querySelector('.show')) { reloaded = true; location.reload(); }
+    });
   }
 })();

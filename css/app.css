@@ -203,6 +203,18 @@ svg.i.fill { fill: currentColor; }
 .thumb.lat { background: radial-gradient(circle at 50% 30%, #f3d79a 0, #b8893e 18%, #2c3d72 48%, #121d3d 100%); }
 .thumb.lat svg { fill: #f6e6bd; opacity: .9; }
 .thumb.user { background: radial-gradient(circle at 50% 100%, #c9d6ff 0, #6b7fbf 25%, #24305a 60%, #121d3d 100%); }
+.thumb.web { background: radial-gradient(circle at 30% 20%, #e8d6a8 0, #8f7a55 20%, #33406b 52%, #121d3d 100%); }
+.thumb.web svg { fill: #f3e6c4; opacity: .85; }
+
+.sec-title > span { color: var(--muted); font-weight: 500; letter-spacing: .02em; font-size: 12.5px; }
+.sec-title .src-tag { font-size: 10.5px; letter-spacing: .08em; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; color: var(--muted); }
+.hint.loading { display: flex; align-items: center; gap: 10px; padding: 14px 16px; }
+.hint.loading .spin { border-color: rgba(214, 178, 110, .25); border-top-color: var(--gold); }
+.hint b { color: var(--text); font-weight: 600; }
+button.link { color: var(--gold-2); text-decoration: underline; font-size: inherit; }
+.web-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 13px; background: rgba(214, 178, 110, .08); border: 1px solid var(--line); color: #cfd5e4; font-size: 13px; line-height: 1.5; }
+.web-note .i { color: var(--gold); margin-top: 1px; }
+.web-note a { color: var(--gold-2); text-decoration: underline; }
 
 .cat-ico { width: 46px; height: 46px; border-radius: 50%; flex: none; display: grid; place-items: center; background: radial-gradient(circle at 35% 30%, #f6e2ad, #c99a4f 70%); color: #1b1a22; box-shadow: 0 0 0 3px rgba(214, 178, 110, .16); }
 .cat-ico svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }

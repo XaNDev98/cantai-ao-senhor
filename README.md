@@ -6,7 +6,8 @@ Funciona no navegador do celular, pode ser **instalado na tela inicial** e conti
 
 ## Recursos
 
-- **Busca** por título, trecho da letra ou autor (ignora acentos), com filtros: com cifra, só letra, latim.
+- **Busca de qualquer música**: procura no acervo e na internet (base aberta de letras [LRCLIB](https://lrclib.net)), por título, trecho ou cantor, ignorando acentos. A letra da internet abre no app e pode virar PPT, ir para o repertório ou favoritas.
+- **Cifra para qualquer música**: em músicas da internet, “Procurar cifra” abre a busca na web e “Adicionar cifra” recebe a cifra colada (formato dos sites, acordes na linha de cima), que vira uma versão com acordes salva no aparelho.
 - **Categorias** na ordem da missa: Entrada, Ato Penitencial, Glória, Aclamação, Ofertório, Santo, Cordeiro, Comunhão, Pós-Comunhão, Final, Marianos, Natal…
 - **Letra ou cifra**, com acordes alinhados sobre as sílabas, **transposição de tom**, ajuste do tamanho da letra e leitura clara/escura.
 - **Converter para PPT**: slides 16:9 com fundos nas **cores do tempo litúrgico**, fundo simples (preto/branco/azul) ou **foto própria**; refrão repetido automaticamente após cada estrofe; linhas por slide ajustáveis.
