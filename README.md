@@ -7,7 +7,7 @@ Funciona no navegador do celular, pode ser **instalado na tela inicial** e conti
 ## Recursos
 
 - **Busca de qualquer música**: procura no acervo e na internet (base aberta de letras [LRCLIB](https://lrclib.net)), por título, trecho ou cantor, ignorando acentos. A letra da internet abre no app e pode virar PPT, ir para o repertório ou favoritas.
-- **Cifra para qualquer música**: quando a música não tem cifra no acervo, a aba **Cifra** mostra a página do próprio **Cifra Club** dentro do app (incorporação permitida pelo site, com a marca e os anúncios dele; o app não copia o conteúdo). “Outras versões” mostra a lista do site. Para guardar, copie a cifra e toque em “Copiei a cifra: salvar no app”: ela vira uma versão com acordes no aparelho, com troca de tom e PPT.
+- **Cifra para qualquer música**: quando a música ainda não tem cifra, a aba **Cifra** mostra uma tela limpa para salvá-la uma vez: copie a cifra (de onde quiser) e toque em “Colar cifra copiada”. A partir daí ela abre sempre no app, só letra e acordes, com troca de tom, PPT e sem internet.
 - **Categorias** na ordem da missa: Entrada, Ato Penitencial, Glória, Aclamação, Ofertório, Santo, Cordeiro, Comunhão, Pós-Comunhão, Final, Marianos, Natal…
 - **Letra ou cifra**, com acordes alinhados sobre as sílabas, **transposição de tom**, ajuste do tamanho da letra e leitura clara/escura.
 - **Converter para PPT**: slides 16:9 com fundos nas **cores do tempo litúrgico**, fundo simples (preto/branco/azul) ou **foto própria**; refrão repetido automaticamente após cada estrofe; linhas por slide ajustáveis.

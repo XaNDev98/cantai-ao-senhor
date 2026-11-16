@@ -178,14 +178,6 @@
     { id: 'google', nome: 'Google', url: s => 'https://www.google.com/search?q=' + encodeURIComponent(`cifra ${cleanTitle(s.titulo)} ${cleanArtist(s.autor)}`.trim()) }
   ];
   const chordSearchURL = s => CHORD_SITES[0].url(s);
-  // Página direta da cifra no Cifra Club: /cantor/musica/
-  const slugify = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-    .replace(/&/g, ' e ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  const mainArtist = a => cleanArtist(String(a || '').split(/,|&|\bfeat\.?|\bpart\.?|\bft\.?|\se\s(?=[A-Z])/)[0]);
-  const chordPageURL = s => {
-    const art = slugify(mainArtist(s.autor)), mus = slugify(cleanTitle(s.titulo));
-    return art && mus ? `https://www.cifraclub.com.br/${art}/${mus}/` : chordSearchURL(s);
-  };
   const songHasChords = s => C.hasChords(s.texto);
 
   const favs = () => store.get('favs', []);
@@ -412,26 +404,17 @@
   }
 
   /* ---------- cifra para músicas que ainda não têm ----------
-   * Mostra a página do próprio Cifra Club dentro do app (o site permite ser
-   * incorporado). O conteúdo continua sendo do site, com a marca e os anúncios
-   * dele; o app não copia nada. O sandbox impede o site de tirar a pessoa do app. */
+   * Tela limpa, sem sites dentro do app. A cifra é salva uma vez (colada pela
+   * pessoa) e a partir daí abre sempre aqui, só letra e acordes. */
   function noChordsPanel(s) {
     const canClip = !!(navigator.clipboard && navigator.clipboard.readText);
-    const site = CHORD_SITES[0];
-    return `<div class="cframe">
-      <div class="cf-bar">
-        <span class="cf-src">${ic('music', 'sm')} Cifra do <b>${esc(site.nome)}</b></span>
-        <button class="cf-out" data-cf="search">${ic('list', 'sm')} Outras versões</button>
-      </div>
-      <iframe class="cf-frame" src="${chordPageURL(s)}" title="Cifra de ${esc(s.titulo)} no ${esc(site.nome)}"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-presentation allow-storage-access-by-user-activation allow-popups-to-escape-sandbox"
-        referrerpolicy="strict-origin-when-cross-origin"></iframe>
-      <div class="cf-foot">
-        <p>Cifra exibida diretamente do ${esc(site.nome)}. Se aparecer outra música ou a página vazia, toque em <b>Outras versões</b> e escolha na lista.</p>
-        ${canClip ? `<button class="btn small block" data-act="pastechords">${ic('paste', 'sm')} Copiei a cifra: salvar no app</button>` : ''}
-        <p class="cf-more">Salvando, ela fica no seu aparelho, abre sem internet, troca de tom e entra no PPT. ·
-          <a href="#/nova?base=${encodeURIComponent(s.id)}">colar manualmente</a></p>
-      </div>
+    return `<div class="nochords">
+      <span class="nc-ico">${ic('music')}</span>
+      <b>Esta música ainda não tem cifra no app</b>
+      <p class="nc-sub">Salve a cifra uma vez e ela passa a aparecer aqui, só letra e acordes, com troca de tom e sem internet.</p>
+      ${canClip ? `<button class="btn gold block" data-act="pastechords">${ic('paste')} Colar cifra copiada</button>` : ''}
+      <a class="btn block" href="#/nova?base=${encodeURIComponent(s.id)}">${ic('edit')} ${canClip ? 'Digitar ou colar no editor' : 'Colar a cifra'}</a>
+      <a class="nc-link" href="${chordSearchURL(s)}" target="_blank" rel="noopener">Procurar a cifra na internet</a>
     </div>`;
   }
 
@@ -530,14 +513,6 @@
           if (fav) fav.onclick = () => { toast(toggleFav(s.id) ? 'Adicionada às favoritas' : 'Removida das favoritas'); refresh(); };
           const paste = $('[data-act="pastechords"]', wrap);
           if (paste) paste.onclick = () => pasteChords(s, paste);
-          const cfSearch = $('[data-cf="search"]', wrap);
-          if (cfSearch) cfSearch.onclick = () => {
-            const fr = $('.cf-frame', wrap);
-            const toList = cfSearch.dataset.cf === 'search';
-            fr.src = toList ? chordSearchURL(s) : chordPageURL(s);
-            cfSearch.dataset.cf = toList ? 'page' : 'search';
-            cfSearch.innerHTML = toList ? `${ic('music', 'sm')} Cifra principal` : `${ic('list', 'sm')} Outras versões`;
-          };
         };
         const refresh = () => { wrap.innerHTML = body(); bind(); };
         bind();

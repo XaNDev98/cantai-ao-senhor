@@ -230,6 +230,7 @@ button.link { color: var(--gold-2); text-decoration: underline; font-size: inher
 .nochords ol em { font-style: normal; font-weight: 600; color: var(--paper-ink); }
 .nochords .btn:not(.gold) { background: #fff; color: var(--paper-ink); border-color: #ddd5c3; }
 .nochords .btn:not(.gold) .i { color: #8a6420; }
+.nochords .nc-sub { margin: 0 0 4px; color: #4a5266; font-size: 14px; line-height: 1.5; }
 .nochords .nc-sites { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .nochords .nc-link { color: #8a6420; text-decoration: underline; font-size: 14px; }
 .nochords small { color: var(--paper-muted); font-size: 12px; line-height: 1.45; }
