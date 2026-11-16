@@ -169,7 +169,23 @@
     if (!x.plainLyrics) throw new Error('Letra indisponível');
     return webToSong(x);
   }
-  const chordSearchURL = s => 'https://www.google.com/search?q=' + encodeURIComponent(`cifra ${s.titulo} ${s.autor || ''}`.trim());
+  // Sites gratuitos de cifra (o app só abre a busca; a cifra é copiada pelo usuário)
+  const cleanArtist = a => String(a || '').replace(/\bPe\.\s*/gi, 'Padre ').replace(/,?\s*S\.?C\.?J\.?$/i, '').replace(/\s*\(.*?\)/g, '').trim();
+  const cleanTitle = t => String(t || '').replace(/\s*[([].*?[)\]]/g, '').replace(/\s+-\s+.*$/, '').trim();
+  const CHORD_SITES = [
+    { id: 'cifraclub', nome: 'Cifra Club', url: s => 'https://www.cifraclub.com.br/?q=' + encodeURIComponent(`${cleanTitle(s.titulo)} ${cleanArtist(s.autor)}`.trim()) },
+    { id: 'cifras', nome: 'Cifras.com.br', url: s => 'https://www.cifras.com.br/busca?q=' + encodeURIComponent(cleanTitle(s.titulo)) },
+    { id: 'google', nome: 'Google', url: s => 'https://www.google.com/search?q=' + encodeURIComponent(`cifra ${cleanTitle(s.titulo)} ${cleanArtist(s.autor)}`.trim()) }
+  ];
+  const chordSearchURL = s => CHORD_SITES[0].url(s);
+  // Página direta da cifra no Cifra Club: /cantor/musica/
+  const slugify = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .replace(/&/g, ' e ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const mainArtist = a => cleanArtist(String(a || '').split(/,|&|\bfeat\.?|\bpart\.?|\bft\.?|\se\s(?=[A-Z])/)[0]);
+  const chordPageURL = s => {
+    const art = slugify(mainArtist(s.autor)), mus = slugify(cleanTitle(s.titulo));
+    return art && mus ? `https://www.cifraclub.com.br/${art}/${mus}/` : chordSearchURL(s);
+  };
   const songHasChords = s => C.hasChords(s.texto);
 
   const favs = () => store.get('favs', []);
@@ -395,6 +411,57 @@
       }).join('');
   }
 
+  /* ---------- cifra para músicas que ainda não têm ----------
+   * Mostra a página do próprio Cifra Club dentro do app (o site permite ser
+   * incorporado). O conteúdo continua sendo do site, com a marca e os anúncios
+   * dele; o app não copia nada. O sandbox impede o site de tirar a pessoa do app. */
+  function noChordsPanel(s) {
+    const canClip = !!(navigator.clipboard && navigator.clipboard.readText);
+    const site = CHORD_SITES[0];
+    return `<div class="cframe">
+      <div class="cf-bar">
+        <span class="cf-src">${ic('music', 'sm')} Cifra do <b>${esc(site.nome)}</b></span>
+        <button class="cf-out" data-cf="search">${ic('list', 'sm')} Outras versões</button>
+      </div>
+      <iframe class="cf-frame" src="${chordPageURL(s)}" title="Cifra de ${esc(s.titulo)} no ${esc(site.nome)}"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-presentation allow-storage-access-by-user-activation allow-popups-to-escape-sandbox"
+        referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      <div class="cf-foot">
+        <p>Cifra exibida diretamente do ${esc(site.nome)}. Se aparecer outra música ou a página vazia, toque em <b>Outras versões</b> e escolha na lista.</p>
+        ${canClip ? `<button class="btn small block" data-act="pastechords">${ic('paste', 'sm')} Copiei a cifra: salvar no app</button>` : ''}
+        <p class="cf-more">Salvando, ela fica no seu aparelho, abre sem internet, troca de tom e entra no PPT. ·
+          <a href="#/nova?base=${encodeURIComponent(s.id)}">colar manualmente</a></p>
+      </div>
+    </div>`;
+  }
+
+  function replaceRefs(oldId, newId) {
+    if (oldId === newId) return;
+    setRep(rep().map(r => r.id === oldId ? { ...r, id: newId } : r));
+    store.set('favs', favs().map(x => x === oldId ? newId : x));
+    store.set('hist', hist().map(x => x === oldId ? newId : x));
+  }
+
+  async function pasteChords(s, btn) {
+    let txt = '';
+    try { txt = await navigator.clipboard.readText(); } catch { /* permissão negada */ }
+    if (!txt || !txt.trim()) {
+      toast('Não consegui ler o que foi copiado — cole no campo');
+      return go('#/nova?base=' + encodeURIComponent(s.id));
+    }
+    const clean = C.cleanPasted(txt, s);
+    if (!C.hasChords(clean.texto)) {
+      toast('O texto copiado não tem acordes. Copie a cifra inteira do site.');
+      btn && btn.classList.add('shake'); setTimeout(() => btn && btn.classList.remove('shake'), 500);
+      return;
+    }
+    const saved = saveUserSong({ titulo: s.titulo, categoria: s.categoria || 'outros', tom: clean.tom, autor: s.autor || '', texto: clean.texto }, isUser(s) ? s.id : undefined);
+    replaceRefs(s.id, saved.id);
+    setSettings({ modo: 'cifra' });
+    toast('Cifra salva!');
+    go('#/musica/' + encodeURIComponent(saved.id), true);
+  }
+
   views.musica = ([id]) => {
     const s = getSong(id);
     if (!s && String(id).startsWith('web-')) {
@@ -419,9 +486,9 @@
       const key = s.tom || C.firstChord(s.texto);
       return `<div class="seg" role="tablist">
           <button data-mode="letra" class="${mode === 'letra' ? 'on' : ''}" role="tab">Letra</button>
-          <button data-mode="cifra" class="${mode === 'cifra' ? 'on' : ''}" role="tab" ${chords ? '' : 'disabled title="Esta música não tem cifra cadastrada"'}>Cifra</button>
+          <button data-mode="cifra" class="${mode === 'cifra' ? 'on' : ''}" role="tab">Cifra</button>
         </div>
-        <div class="tools">
+        ${mode === 'cifra' && !chords ? noChordsPanel(s) : `<div class="tools">
           ${mode === 'cifra' ? `<div class="tool"><button data-tr="-1" aria-label="Baixar meio tom">${ic('minus', 'sm')}</button><span class="lbl">Tom <b>${esc(C.transposeKey(key, st))}</b></span><button data-tr="1" aria-label="Subir meio tom">${ic('plus', 'sm')}</button></div>` : ''}
           <div class="tool"><button data-fs="-1" aria-label="Diminuir letra">A−</button><button data-fs="1" aria-label="Aumentar letra">A+</button></div>
           <span class="sp"></span>
@@ -431,7 +498,7 @@
         <article class="paper ${mode === 'letra' ? 'lyrics' : ''} ${settings().papel === 'escuro' ? 'dark' : ''}" style="--fs:${settings().fs}px">
           ${renderSongBody(s, mode, st)}
           <div class="src">${s.autor ? esc(s.autor) + ' · ' : ''}${esc(s.fonte || (isUser(s) ? 'Cadastrada por você' : ''))}</div>
-        </article>`;
+        </article>`}`;
     }
 
     return {
@@ -449,18 +516,28 @@
           <button class="btn stack" data-act="share">${ic('share')}Compartilhar</button>
         </div>
         ${isUser(s) ? `<div class="row3" style="grid-template-columns:1fr 1fr"><a class="btn small" href="#/editar/${encodeURIComponent(s.id)}">${ic('edit', 'sm')} Editar</a><button class="btn small danger" data-act="del">${ic('trash', 'sm')} Excluir</button></div>`
-          : isWeb(s) ? `<div class="web-note">${ic('info', 'sm')}<span>Letra encontrada na internet. Para tocar, procure a cifra e cole em “Adicionar cifra”: ela fica salva no seu acervo.</span></div>
-            <div class="row3" style="grid-template-columns:1fr 1fr"><a class="btn small" href="${chordSearchURL(s)}" target="_blank" rel="noopener">${ic('search', 'sm')} Procurar cifra</a><a class="btn small" href="#/nova?base=${encodeURIComponent(s.id)}">${ic('music', 'sm')} Adicionar cifra</a></div>`
-          : `<a class="btn small" href="#/nova?base=${encodeURIComponent(s.id)}">${ic('edit', 'sm')} Criar uma cópia editável</a>`}
+          : isWeb(s) ? '' : `<a class="btn small" href="#/nova?base=${encodeURIComponent(s.id)}">${ic('edit', 'sm')} Criar uma cópia editável</a>`}
       </div>`,
       after(el) {
         const wrap = $('#songbody', el);
         const bind = () => {
-          $$('[data-mode]', wrap).forEach(b => b.onclick = () => { if (b.disabled) return; mode = b.dataset.mode; setSettings({ modo: mode }); refresh(); });
+          $$('[data-mode]', wrap).forEach(b => b.onclick = () => { mode = b.dataset.mode; if (chords) setSettings({ modo: mode }); refresh(); });
           $$('[data-tr]', wrap).forEach(b => b.onclick = () => { st = ((st + Number(b.dataset.tr)) % 12 + 12) % 12; if (st > 6) st -= 12; store.set('tr:' + s.id, st); refresh(); });
           $$('[data-fs]', wrap).forEach(b => b.onclick = () => { const fs = Math.min(30, Math.max(14, settings().fs + Number(b.dataset.fs))); setSettings({ fs }); $('.paper', wrap).style.setProperty('--fs', fs + 'px'); });
-          $('[data-act="paper"]', wrap).onclick = () => { setSettings({ papel: settings().papel === 'escuro' ? 'claro' : 'escuro' }); refresh(); };
-          $('[data-act="fav"]', wrap).onclick = () => { toast(toggleFav(s.id) ? 'Adicionada às favoritas' : 'Removida das favoritas'); refresh(); };
+          const paper = $('[data-act="paper"]', wrap);
+          if (paper) paper.onclick = () => { setSettings({ papel: settings().papel === 'escuro' ? 'claro' : 'escuro' }); refresh(); };
+          const fav = $('[data-act="fav"]', wrap);
+          if (fav) fav.onclick = () => { toast(toggleFav(s.id) ? 'Adicionada às favoritas' : 'Removida das favoritas'); refresh(); };
+          const paste = $('[data-act="pastechords"]', wrap);
+          if (paste) paste.onclick = () => pasteChords(s, paste);
+          const cfSearch = $('[data-cf="search"]', wrap);
+          if (cfSearch) cfSearch.onclick = () => {
+            const fr = $('.cf-frame', wrap);
+            const toList = cfSearch.dataset.cf === 'search';
+            fr.src = toList ? chordSearchURL(s) : chordPageURL(s);
+            cfSearch.dataset.cf = toList ? 'page' : 'search';
+            cfSearch.innerHTML = toList ? `${ic('music', 'sm')} Cifra principal` : `${ic('list', 'sm')} Outras versões`;
+          };
         };
         const refresh = () => { wrap.innerHTML = body(); bind(); };
         bind();
@@ -847,11 +924,9 @@
         f.onsubmit = e => {
           e.preventDefault();
           if (!f.texto.value.trim()) return toast('Escreva a letra');
-          const saved = saveUserSong({ titulo: f.titulo.value, categoria: f.categoria.value, tom: f.tom.value, autor: f.autor.value, texto: f.texto.value }, existing && existing.id);
-          if (fromWeb) { // a versão salva substitui a da internet no repertório e nas favoritas
-            setRep(rep().map(r => r.id === base.id ? { ...r, id: saved.id } : r));
-            store.set('favs', favs().map(x => x === base.id ? saved.id : x));
-          }
+          const clean = C.cleanPasted(f.texto.value, { titulo: f.titulo.value, autor: f.autor.value });
+          const saved = saveUserSong({ titulo: f.titulo.value, categoria: f.categoria.value, tom: f.tom.value.trim() || clean.tom, autor: f.autor.value, texto: clean.texto }, existing && existing.id);
+          if (fromWeb) replaceRefs(base.id, saved.id); // a versão salva substitui a da internet
           toast(fromWeb ? 'Salva no seu acervo' : 'Música salva');
           go('#/musica/' + encodeURIComponent(saved.id), true);
         };

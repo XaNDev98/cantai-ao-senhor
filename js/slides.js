@@ -43,6 +43,8 @@
   }
 
   /* ------------- texto colado no formato "acorde acima da letra" ------------- */
+  // caracteres invisíveis que sites de cifra colocam no texto (atrapalham o alinhamento)
+  const stripInvisible = s => String(s || '').replace(/[​-‍⁠﻿­]/g, '');
   // "(G)" -> "G", mas "G7M(9)" continua igual
   const unwrap = t => /^\(.*\)$/.test(t) ? t.slice(1, -1) : t;
   function isChordLine(line) {
@@ -58,18 +60,22 @@
   function mergeChordLine(chordLine, lyric) {
     const marks = [];
     chordLine.replace(/\S+/g, (tok, pos) => { marks.push({ tok, pos }); return tok; });
-    let out = lyric;
-    const maxPos = marks.length ? marks[marks.length - 1].pos : 0;
-    if (out.length < maxPos) out = out.padEnd(maxPos, ' ');
+    let out = lyric.replace(/\s+$/, '');
+    // acordes depois do fim da frase: entram em sequência, sem o espaçamento original
+    const endLen = out.length;
+    const tail = marks.filter(m => m.pos >= endLen).map(m => unwrap(m.tok)).filter(c => CHORD_RE.test(c));
+    marks.splice(0, marks.length, ...marks.filter(m => m.pos < endLen));
+    if (tail.length) out += ' ' + tail.map(c => `[${c}]`).join(' ');
     for (let k = marks.length - 1; k >= 0; k--) {
       const { tok } = marks[k];
       let { pos } = marks[k];
       const c = unwrap(tok);
       if (!CHORD_RE.test(c)) continue;
-      // acorde caiu num espaço (cifra levemente desalinhada): encosta na próxima sílaba
-      if (out[pos] === ' ' && pos > 0 && out[pos - 1] !== ' ') {
+      // acorde caiu num espaço (cifra levemente desalinhada ou linha recuada): encosta na próxima sílaba
+      if (out[pos] === ' ') {
         const nx = out.slice(pos).search(/\S/);
-        if (nx > 0 && nx <= 2) pos += nx;
+        const leading = !out.slice(0, pos).trim();
+        if (nx > 0 && (leading || (out[pos - 1] !== ' ' && nx <= 2))) pos += nx;
       }
       out = out.slice(0, pos) + `[${c}]` + out.slice(pos);
     }
@@ -80,6 +86,9 @@
 
   function labelOf(t) {
     if (t.startsWith('@')) return { label: t.slice(1).trim(), rest: '' };
+    // qualquer "[Nome da parte]" sozinho na linha (ex.: [Primeira Parte], [Final])
+    const b = t.match(/^\[([^\]]{2,30})\]\s*:?\s*(.*)$/);
+    if (b && !CHORD_RE.test(b[1]) && (!b[2] || isChordLine(b[2]))) return { label: b[1].trim(), rest: b[2] || '' };
     const m = t.match(LABEL_RE);
     if (!m) return null;
     // "[Intro] G D Em" -> rótulo + linha de acordes
@@ -90,7 +99,7 @@
 
   /** Converte texto colado (cifra "acima da letra") para o formato com [acordes]. */
   function normalizeSheet(raw) {
-    const lines = String(raw || '').replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n');
+    const lines = stripInvisible(raw).replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n');
     const out = [];
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
@@ -111,9 +120,36 @@
     return out.join('\n');
   }
 
+  /**
+   * Limpa o texto copiado de sites de cifra: tira cabeçalhos, tablaturas e
+   * avisos, e devolve { texto, tom }.
+   */
+  function cleanPasted(raw, meta = {}) {
+    let tom = '';
+    const out = [];
+    const lines = stripInvisible(raw).replace(/\r\n?/g, '\n').replace(/ /g, ' ').replace(/\t/g, '    ').split('\n');
+    const nrm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const skipHead = new Set([nrm(meta.titulo), nrm(meta.autor)].filter(Boolean));
+    let started = false;
+    for (const line of lines) {
+      const t = line.trim();
+      // título/cantor repetidos no topo do texto copiado
+      if (!started && (!t || skipHead.has(nrm(t)))) continue;
+      started = true;
+      const m = t.match(/^tom:\s*([A-G][#b]?m?)/i);
+      if (m) { tom = m[1].charAt(0).toUpperCase() + m[1].slice(1); continue; }
+      if (/^[eEBGDA]\s?[|:][-\d|hpbr/\\~xX\s.()]*$/.test(t)) continue;          // tablatura
+      if (/^(parte \d+ de \d+|afina[cç][aã]o|capotraste|composi[cç][aã]o|colabora[cç][aã]o|revis(ã|a)o|cifra club|cifras\.com|exibir cifra|simplificar cifra|auto rolagem|texto|acordes|imprimir)\b/i.test(t)) continue;
+      if (/^\(?\s*(\d+x|bis)\s*\)?$/i.test(t)) { out.push(t); continue; }
+      out.push(line.replace(/\s+$/, ''));
+    }
+    const texto = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    return { texto, tom };
+  }
+
   function kindOf(label) {
     if (/refr|coro|ant[ií]fona|resposta/i.test(label) && !/pr[eé]-?refr/i.test(label)) return 'refrao';
-    if (/^(intro|solo)/i.test(label)) return 'instrumental';
+    if (/^(intro|solo|tab|dedilhado|riff|interl[uú]dio)/i.test(label)) return 'instrumental';
     return 'estrofe';
   }
 
@@ -363,7 +399,7 @@
   }
 
   window.Cantai = {
-    THEMES, parseSong, normalizeSheet, stripChords, hasChords, firstChord,
+    THEMES, parseSong, normalizeSheet, cleanPasted, stripChords, hasChords, firstChord,
     transposeChord, transposeKey, useFlats, isChordLine,
     buildSlides, fitSize, backgroundURL, makePptx, loadLib, slug
   };
