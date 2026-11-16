@@ -165,12 +165,21 @@ svg.i.fill { fill: currentColor; }
 .tile.wide .cat-ico { width: 42px; height: 42px; }
 .tile.wide .cat-ico svg { width: 22px; height: 22px; }
 .tile.wide > .i { width: 18px; height: 18px; color: var(--muted); }
-.oe-wrap { margin: 10px 10px 0; border-radius: var(--radius); overflow: hidden; background: #fff; box-shadow: 0 16px 40px rgba(0, 0, 0, .35); }
-.oe-frame { display: block; width: 100%; height: calc(100dvh - 210px); min-height: 420px; border: 0; background: #fff; }
-.oe-foot { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 8px; padding: 8px 10px; background: var(--paper); border-top: 1px solid var(--paper-line); }
-.oe-foot small { text-align: center; color: var(--paper-muted); font-size: 11px; line-height: 1.3; }
-.oe-foot .btn { height: 36px; padding: 0 10px; background: #fff; color: var(--paper-ink); border-color: #ddd5c3; font-size: 13px; }
-.oe-foot .btn .i { color: #8a6420; }
+.oe-get { margin: 14px 16px 0; padding: 16px; border-radius: var(--radius); background: var(--paper); color: var(--paper-ink); display: grid; gap: 8px; }
+.oe-get > b { font: 600 20px/1.2 var(--serif); }
+.oe-get ol { margin: 0; padding-left: 20px; color: #3c4356; font-size: 14px; line-height: 1.55; }
+.oe-get em { font-style: normal; font-weight: 600; color: var(--paper-ink); }
+.oe-get small { color: var(--paper-muted); font-size: 12px; }
+.oe-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.oe-btns .btn:not(.gold) { background: #fff; color: var(--paper-ink); border-color: #ddd5c3; }
+.oe-btns .btn:not(.gold) .i { color: #8a6420; }
+.oe-nav { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; padding: 14px 16px 0; }
+.oe-nav .btn { height: 40px; }
+.oe-text h3 { margin: 0 0 1em; font: 600 1.35em/1.15 var(--serif); color: var(--paper-chord); }
+.oe-text p { margin: 0 0 1em; line-height: 1.55; }
+.oe-text .oe-r { font-weight: 600; }
+.oe-text .oe-r b, .oe-text .oe-v b { color: var(--paper-chord); }
+.cat-ico.off { opacity: .55; }
 .hscroll { display: flex; gap: 10px; overflow-x: auto; padding: 0 16px 6px; scroll-snap-type: x mandatory; scrollbar-width: none; }
 .hscroll::-webkit-scrollbar { display: none; }
 .mini { flex: none; width: 150px; scroll-snap-align: start; padding: 10px; border-radius: 14px; background: var(--card); border: 1px solid var(--line-soft); }

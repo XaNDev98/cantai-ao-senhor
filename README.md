@@ -11,6 +11,7 @@ Funciona no navegador do celular, pode ser **instalado na tela inicial** e conti
 - **Categorias** na ordem da missa: Entrada, Ato Penitencial, Glória, Aclamação, Ofertório, Santo, Cordeiro, Comunhão, Pós-Comunhão, Final, Marianos, Natal…
 - **Letra ou cifra**, com acordes alinhados sobre as sílabas, **transposição de tom**, ajuste do tamanho da letra e leitura clara/escura.
 - **Desenhos dos acordes**: faixa com os acordes da música (já no tom escolhido) e toque em qualquer acorde para ver como montar no violão. Diagramas da base aberta [Open Guitar Chords](https://openguitarchords.com) (uso livre), em `vendor/acordes.json` — regerar com `node tools/build-acordes.mjs`.
+- **Orações Eucarísticas** (I a V, Diversas Circunstâncias, com Crianças, Reconciliação): o texto do Missal é protegido por direito autoral e **não está no código**. A pessoa copia cada oração (ex.: do site Católico Orante) e toca em “Colar oração copiada”: o app reconhece qual das 14 é, tira os botões do site e guarda no aparelho. Depois ela abre limpa, com V./R./CP/CC destacados, sem internet.
 - **Acervo com 41 cantos**, 25 com cifra, cobrindo todos os momentos da missa e os tempos litúrgicos (Advento, Natal, Quaresma, Páscoa).
 - **Converter para PPT**: slides 16:9 com fundos nas **cores do tempo litúrgico**, fundo simples (preto/branco/azul) ou **foto própria**; refrão repetido automaticamente após cada estrofe; linhas por slide ajustáveis.
 - **Repertório da Missa**: monte a sequência de cantos e gere **um único PPT** com todos.

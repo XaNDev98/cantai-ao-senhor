@@ -307,7 +307,7 @@
         <a class="tile" href="#/converter">${ic('slides')}<span><strong>Converter para PPT</strong><small>Slides prontos</small></span></a>
         <a class="tile" href="#/repertorio">${ic('list')}<span><strong>Repertório</strong><small>Monte a missa</small></span>${n ? `<span class="count">${n}</span>` : ''}</a>
         <a class="tile" href="#/favoritos">${ic('star')}<span><strong>Favoritas</strong><small>${favs().length || 'Nenhuma'} ${favs().length === 1 ? 'música' : favs().length ? 'músicas' : 'ainda'}</small></span></a>
-        <a class="tile wide" href="#/oracoes"><span class="cat-ico">${catIc('calice')}</span><span><strong>Orações Eucarísticas</strong><small>I a V, diversas circunstâncias, com crianças e reconciliação</small></span>${ic('chev', 'sm')}</a>
+        <a class="tile wide" href="#/oracoes"><span class="cat-ico">${catIc('calice')}</span><span><strong>Orações Eucarísticas</strong><small>Guarde as 14 no app e leia sem internet</small></span>${ic('chev', 'sm')}</a>
       </section>
       ${h.length ? `<div class="sec-title">Vistas recentemente <a href="#/historico">Ver tudo</a></div>
       <div class="hscroll">${h.map(s => `<a class="mini" href="#/musica/${encodeURIComponent(s.id)}"><span class="thumb ${thumbCls(s)}" style="width:100%">${CROSS_THUMB}</span><b>${esc(s.titulo)}</b><span>${esc(catOf(s.categoria).nome)}</span></a>`).join('')}</div>` : ''}
@@ -943,8 +943,9 @@
 
   /* ---------- Orações Eucarísticas ----------
    * O texto é a tradução oficial do Missal Romano (protegida por direito autoral),
-   * por isso não é copiado para o app: a página do site Católico Orante, que
-   * permite ser incorporada, é exibida dentro do app, já na oração escolhida. */
+   * por isso NÃO vai no código. A pessoa copia cada oração (ex.: do site Católico
+   * Orante) e toca em "Colar": o app reconhece qual é, limpa e guarda no aparelho.
+   * Depois ela abre aqui, limpa e sem internet. */
   const OE_SITE = 'https://www.catolicoorante.com.br/oeucaristicas.html';
   const ORACOES = [
     { id: 'I', nome: 'Oração Eucarística I', sub: 'Cânon Romano' },
@@ -963,32 +964,149 @@
     { id: 'R-II', nome: 'Sobre a Reconciliação II', sub: '' }
   ];
 
-  views.oracoes = ([id]) => {
+  const oeText = id => store.get('oe:' + id, '');
+  const oeCount = () => ORACOES.filter(o => oeText(o.id)).length;
+
+  /** Descobre qual oração é pelo título que vem no texto copiado. */
+  function detectOE(txt) {
+    const head = norm(txt.slice(0, 600)).replace(/\s+/g, ' ');
+    const rom = '(iv|iii|ii|v|i)\\b';
+    let m;
+    if ((m = head.match(new RegExp('diversas circunst\\w* ' + rom)))) return 'DC-' + m[1].toUpperCase();
+    if ((m = head.match(new RegExp('criancas ' + rom)))) return 'CC-' + m[1].toUpperCase();
+    if ((m = head.match(new RegExp('reconcilia\\w* ' + rom)))) return 'R-' + m[1].toUpperCase();
+    if ((m = head.match(new RegExp('eucaristica ' + rom)))) return m[1].toUpperCase();
+    return null;
+  }
+  /** Tira do texto copiado os botões e menus do site e o título repetido. */
+  function cleanOE(txt) {
+    const junk = /^(voltar|prefer[eê]ncias|fechar|menu|zoom|aumentar|diminuir|tema|leitura|normal|topo|compartilhar|imprimir|\s)+$/i;
+    const lines = String(txt).replace(/\r\n?/g, '\n').replace(/[​-‍﻿]/g, '').replace(/ /g, ' ').split('\n')
+      .map(l => l.replace(/\s+$/, ''));
+    const out = [];
+    let started = false;
+    for (const l of lines) {
+      const t = l.trim();
+      if (junk.test(t) || /prefer[eê]ncias\s*fechar/i.test(t)) continue;
+      // título/subtítulo repetidos no começo (ex.: "DIVERSAS CIRCUNSTÂNCIAS I", "MISSAS COM CRIANÇAS III")
+      if (!started && (!t || /^ora[cç][aã]o( eucar[ií]stica.*)?$/i.test(t) || /^eucar[ií]stica\b/i.test(t) || /^(para|com|sobre)\b.{0,40}$/i.test(t)
+        || (t.length < 60 && t === t.toLocaleUpperCase('pt-BR') && /[A-ZÀ-Ý]/.test(t) && !/^(V|R|T|CP|CC)[.:\s]/.test(t)))) continue;
+      started = true;
+      out.push(t);
+    }
+    // links de navegação do site no fim (ex.: "Rito da Comunhão")
+    while (out.length && (!out[out.length - 1] || /^(rito da comunh[aã]o|ritos? finais|pr[oó]xim[oa]|anterior)$/i.test(out[out.length - 1]))) out.pop();
+    return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  function saveOE(id, txt) {
+    const clean = cleanOE(txt);
+    if (clean.length < 200) return false;
+    return store.set('oe:' + id, clean);
+  }
+  async function pasteOE(fallbackId) {
+    let txt = '';
+    try { txt = await navigator.clipboard.readText(); } catch { /* sem permissão */ }
+    if (!txt.trim()) { toast('Não consegui ler o que foi copiado — use o campo de colar'); if (fallbackId) go('#/oracoes/' + fallbackId + '?colar=1', true); return; }
+    const id = detectOE(txt) || fallbackId;
+    if (!id) return toast('Não reconheci qual oração é. Abra a oração e cole por ela.');
     const oe = ORACOES.find(o => o.id === id);
+    if (!saveOE(id, txt)) return toast('O texto copiado está curto demais. Copie a oração inteira.');
+    toast(`${oe.nome} salva (${oeCount()} de ${ORACOES.length})`);
+    render();
+  }
+  function renderOE(txt) {
+    return txt.split(/\n{2,}/).map(par => `<p>${par.split('\n').map(l => {
+      // V. / R. / T. (com ponto) e CP / CC / C1… (celebrante principal, concelebrantes)
+      const m = l.match(/^([VRTP]|Todos|Pres)([.:])\s*(.*)$/) || l.match(/^(CP|CC|C[1-4])([.:]?)\s+(.*)$/);
+      if (!m) return esc(l);
+      const povo = ['R', 'T', 'Todos'].includes(m[1]);
+      return `<span class="oe-${povo ? 'r' : 'v'}"><b>${esc(m[1] + m[2])}</b> ${esc(m[3])}</span>`;
+    }).join('<br>')}</p>`).join('');
+  }
+
+  views.oracoes = ([id], q) => {
+    const oe = ORACOES.find(o => o.id === id);
+    const canClip = !!(navigator.clipboard && navigator.clipboard.readText);
     if (!oe) {
+      const n = oeCount();
       return {
         tab: '',
         html: `${topbar('Orações Eucarísticas')}
-        <ul class="list">${ORACOES.map(o => `<li><a class="row" href="#/oracoes/${o.id}">
-          <span class="cat-ico">${catIc('calice')}</span>
-          <span class="body"><b>${esc(o.nome)}</b>${o.sub ? `<span class="sub">${esc(o.sub)}</span>` : ''}</span>${ic('chev', 'sm chev')}</a></li>`).join('')}</ul>
-        <p class="about">Texto do Missal Romano, exibido do site <b>Católico Orante</b>. É preciso estar conectado à internet.</p>`
+        ${n < ORACOES.length ? `<div class="oe-get">
+          <b>${n ? `${n} de ${ORACOES.length} salvas no app` : 'Traga as orações para o app'}</b>
+          <ol>
+            <li>Abra uma oração no site (botão abaixo) e copie o texto dela.</li>
+            <li>Volte aqui e toque em <em>Colar oração copiada</em>: o app reconhece qual é e guarda.</li>
+          </ol>
+          <div class="oe-btns">
+            <a class="btn small" href="${OE_SITE}" target="_blank" rel="noopener">${ic('search', 'sm')} Abrir o site</a>
+            ${canClip ? `<button class="btn small gold" data-act="oepaste">${ic('paste', 'sm')} Colar oração copiada</button>` : ''}
+          </div>
+          <small>Feito uma vez, a oração fica no seu aparelho e abre aqui, limpa e sem internet.</small>
+        </div>` : ''}
+        <ul class="list">${ORACOES.map(o => {
+          const ok = !!oeText(o.id);
+          return `<li><a class="row" href="#/oracoes/${o.id}">
+          <span class="cat-ico ${ok ? '' : 'off'}">${ok ? ic('check') : catIc('calice')}</span>
+          <span class="body"><b>${esc(o.nome)}</b><span class="sub">${ok ? 'Salva no app' : esc(o.sub || 'Ainda não salva')}</span></span>${ic('chev', 'sm chev')}</a></li>`;
+        }).join('')}</ul>`,
+        after(el) { const b = $('[data-act="oepaste"]', el); if (b) b.onclick = () => pasteOE(null); }
       };
     }
     const i = ORACOES.indexOf(oe), prev = ORACOES[i - 1], next = ORACOES[i + 1];
+    const txt = oeText(oe.id);
+    const nav = `<div class="oe-nav">
+        ${prev ? `<a class="btn small" href="#/oracoes/${prev.id}">${ic('back', 'sm')} ${esc(prev.id)}</a>` : '<span></span>'}
+        <a class="btn small" href="#/oracoes">Todas</a>
+        ${next ? `<a class="btn small" href="#/oracoes/${next.id}">${esc(next.id)} ${ic('chev', 'sm')}</a>` : '<span></span>'}
+      </div>`;
+    if (txt && q.get('colar') !== '1') {
+      return {
+        tab: '',
+        html: `${topbar(oe.nome)}
+        <div class="tools"><div class="tool"><button data-fs="-1" aria-label="Diminuir letra">A−</button><button data-fs="1" aria-label="Aumentar letra">A+</button></div>
+          <span class="sp"></span><a class="btn small" href="#/oracoes/${oe.id}?colar=1">${ic('edit', 'sm')} Substituir</a></div>
+        <article class="paper oe-text" style="--fs:${settings().fs}px"><h3>${esc(oe.nome)}</h3>${renderOE(txt)}</article>
+        ${nav}`,
+        after(el) {
+          $$('[data-fs]', el).forEach(b => b.onclick = () => { const fs = Math.min(30, Math.max(14, settings().fs + Number(b.dataset.fs))); setSettings({ fs }); $('.paper', el).style.setProperty('--fs', fs + 'px'); });
+        }
+      };
+    }
     return {
       tab: '',
       html: `${topbar(oe.nome)}
-      <div class="oe-wrap">
-        <iframe class="oe-frame" src="${OE_SITE}#${oe.id}" title="${esc(oe.nome)}"
-          sandbox="allow-scripts allow-same-origin allow-popups allow-modals"
-          referrerpolicy="strict-origin-when-cross-origin"></iframe>
-        <div class="oe-foot">
-          ${prev ? `<a class="btn small" href="#/oracoes/${prev.id}">${ic('back', 'sm')} ${esc(prev.id)}</a>` : '<span></span>'}
-          <small>Texto: Missal Romano · via Católico Orante</small>
-          ${next ? `<a class="btn small" href="#/oracoes/${next.id}">${esc(next.id)} ${ic('chev', 'sm')}</a>` : '<span></span>'}
+      <div class="oe-get">
+        <b>${txt ? 'Substituir o texto desta oração' : 'Esta oração ainda não está no app'}</b>
+        <ol>
+          <li>Toque em <em>Abrir esta oração</em>, selecione o texto e copie.</li>
+          <li>Volte e toque em <em>Colar</em> (ou cole no campo abaixo e salve).</li>
+        </ol>
+        <div class="oe-btns">
+          <a class="btn small" href="${OE_SITE}#${oe.id}" target="_blank" rel="noopener">${ic('search', 'sm')} Abrir esta oração</a>
+          ${canClip ? `<button class="btn small gold" data-act="oepaste">${ic('paste', 'sm')} Colar</button>` : ''}
         </div>
-      </div>`
+      </div>
+      <form class="form" id="f" style="margin-top:12px">
+        <div class="field"><label for="x">Texto da oração</label><textarea id="x" name="texto" placeholder="Cole aqui o texto da ${esc(oe.nome)}" style="white-space:pre-wrap;font-family:var(--sans);min-height:220px">${esc(txt)}</textarea></div>
+        <button class="btn gold block">${ic('check')} Salvar</button>
+        ${txt ? `<button type="button" class="btn small danger block" data-act="oedel">${ic('trash', 'sm')} Apagar do aparelho</button>` : ''}
+      </form>
+      ${nav}`,
+      after(el) {
+        const b = $('[data-act="oepaste"]', el);
+        if (b) b.onclick = () => pasteOE(oe.id).then(() => { if (oeText(oe.id)) go('#/oracoes/' + oe.id, true); });
+        const f = $('#f', el);
+        f.onsubmit = e => {
+          e.preventDefault();
+          const other = detectOE(f.texto.value);
+          if (other && other !== oe.id && !confirm(`Este texto parece ser a ${ORACOES.find(o => o.id === other).nome}. Salvar mesmo assim como ${oe.nome}?`)) return;
+          if (!saveOE(oe.id, f.texto.value)) return toast('Texto curto demais. Cole a oração inteira.');
+          toast(`${oe.nome} salva`); go('#/oracoes/' + oe.id, true);
+        };
+        const d = $('[data-act="oedel"]', el);
+        if (d) d.onclick = () => { if (confirm(`Apagar a ${oe.nome} deste aparelho?`)) { store.set('oe:' + oe.id, ''); go('#/oracoes/' + oe.id, true); } };
+      }
     };
   };
 
