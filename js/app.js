@@ -1413,7 +1413,7 @@ Regras:
       </div>
       <form class="form" id="f" style="margin-top:12px">
         <div class="field"><label for="k">Chave do Gemini</label>
-          <input id="k" name="key" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…" value="${esc(key)}">
+          <input id="k" name="key" type="password" autocomplete="off" spellcheck="false" placeholder="AQ.… ou AIza…" value="${esc(key)}">
           <p class="help">A chave fica guardada só neste aparelho. Ao gerar uma cifra, a letra da música é enviada ao Google. No plano grátis há limite de pedidos por minuto e por dia.</p></div>
         <button class="btn gold block">${ic('check')} Salvar e testar</button>
         <label class="tg" style="color:var(--text)"><span>Gerar sozinha ao abrir a aba Cifra<small style="color:var(--muted)">Desligado: aparece um botão para gerar</small></span>
@@ -1424,8 +1424,10 @@ Regras:
         const f = $('#f', el);
         f.onsubmit = async e => {
           e.preventDefault();
-          const k = f.key.value.trim();
-          if (!/^[\w-]{20,}$/.test(k)) return toast('Cole a chave inteira (começa com "AIza…")');
+          // aceita "AIza…" (antigo) e "AQ.…" (novo); se colarem a linha inteira do AI Studio, pega só a chave
+          const k = (f.key.value.match(/\b(AIza[\w-]{20,}|AQ\.[\w.-]{20,})/) || f.key.value.trim().match(/^[\w.-]{20,}$/) || [''])[0];
+          if (!k) return toast('Cole a chave inteira (começa com "AIza…" ou "AQ.…")');
+          f.key.value = k;
           const btn = $('button.gold', f), old = btn.innerHTML;
           btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Testando…';
           try {
