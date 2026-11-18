@@ -569,12 +569,19 @@
     if (r.status === 401 || r.status === 403) return new Error('A chave do Gemini não tem permissão. Crie uma nova no Google AI Studio.');
     if (r.status === 429) return Object.assign(new Error('Limite grátis do Gemini atingido. Tente de novo em alguns minutos.'), { quota: true, msg });
     if (r.status === 404) return Object.assign(new Error('Modelo indisponível'), { notFound: true });
+    if (r.status === 400 && /thinking/i.test(msg)) return Object.assign(new Error('Ajuste de raciocínio não aceito'), { thinking: true });
+    if (r.status >= 500) return Object.assign(new Error('O Gemini está sobrecarregado agora. Tente de novo em instantes.'), { busy: true });
     return new Error('Gemini respondeu com erro ' + r.status + (msg ? ': ' + msg.slice(0, 120) : ''));
   }
 
-  /** Modelos "flash" disponíveis para a chave, do melhor para o mais simples. */
+  /**
+   * Modelos disponíveis para a chave, na ordem de uso. Os "flash-lite" vêm
+   * primeiro: respondem em segundos. Os "flash" maiores ficam de reserva
+   * (pensam muito e chegam a levar 1–2 min).
+   */
+  const MODELS_KEY = 'geminiModels2';
   async function gemModels(key, force) {
-    const cached = store.get('geminiModels', null);
+    const cached = store.get(MODELS_KEY, null);
     if (cached && cached.length && !force) return cached;
     const r = await fetch(`${GEM}/models?pageSize=200`, { headers: { 'x-goog-api-key': key } });
     if (!r.ok) throw await gemError(r);
@@ -585,11 +592,11 @@
       .filter(n => /^gemini-.*flash/.test(n) && !/(image|tts|audio|live|embed|vision|exp|8b|computer)/.test(n));
     const score = n => {
       const v = parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
-      return v * 10 - (/lite/.test(n) ? 4 : 0) - (/preview/.test(n) ? 1.5 : 0) + (/latest/.test(n) ? 0.5 : 0);
+      return (/lite/.test(n) ? 1000 : 0) + v * 10 - (/preview/.test(n) ? 1.5 : 0) + (/latest/.test(n) ? 0.5 : 0);
     };
     names.sort((a, b) => score(b) - score(a));
-    const list = names.length ? names.slice(0, 6) : ['gemini-flash-latest', 'gemini-2.5-flash'];
-    store.set('geminiModels', list);
+    const list = names.length ? names.slice(0, 6) : ['gemini-flash-lite-latest', 'gemini-flash-latest'];
+    store.set(MODELS_KEY, list);
     return list;
   }
 
@@ -630,7 +637,7 @@ Regras:
     return C.normalizeSheet(s.texto).split('\n').map(l => C.isLabelLine(l) ? l.trim() : C.stripChords(l));
   }
 
-  async function geminiChords(s) {
+  async function geminiChords(s, onStatus = () => {}) {
     const key = iaKey();
     if (!key) throw new Error('Configure a IA primeiro.');
     const lines = lyricLines(s);
@@ -642,16 +649,37 @@ Regras:
       contents: [{ role: 'user', parts: [{ text: `Música: "${s.titulo}"${s.autor ? ' — ' + s.autor : ''}\nLetra (linhas numeradas):\n${numbered}` }] }],
       generationConfig: { temperature: 0.3, responseMimeType: 'application/json', responseSchema: IA_SCHEMA }
     };
-    let models = await gemModels(key), lastErr = null;
+    const models = await gemModels(key);
+    let lastErr = null;
     for (let i = 0; i < models.length && i < 4; i++) {
-      const model = models[i];
-      const r = await fetch(`${GEM}/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body)
-      });
+      const model = models[i], lite = /lite/.test(model);
+      if (i > 0) onStatus('Tentando outro modelo da IA…');
+      // modelos maiores: pede pouco raciocínio (senão levam 1–2 min)
+      let cfg = lite ? body.generationConfig : { ...body.generationConfig, thinkingConfig: { thinkingLevel: 'low' } };
+      let r;
+      for (let tentativa = 0; tentativa < 2; tentativa++) {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), lite ? 30000 : 75000);
+        try {
+          r = await fetch(`${GEM}/models/${encodeURIComponent(model)}:generateContent`, {
+            method: 'POST', signal: ctl.signal,
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+            body: JSON.stringify({ ...body, generationConfig: cfg })
+          });
+        } catch (e) {
+          r = null;
+          lastErr = new Error(e.name === 'AbortError' ? 'A IA demorou demais para responder. Tente de novo.' : 'Sem conexão com a IA. Verifique a internet.');
+        } finally { clearTimeout(timer); }
+        if (r && !r.ok) {
+          lastErr = await gemError(r);
+          if (lastErr.thinking && cfg.thinkingConfig) { cfg = body.generationConfig; continue; } // repete sem o ajuste
+        }
+        break;
+      }
+      if (!r) continue;                                    // tempo esgotado ou sem rede: próximo modelo
       if (!r.ok) {
-        lastErr = await gemError(r);
-        // modelo sem cota grátis ("limit: 0") ou inexistente: tenta o próximo
-        if (lastErr.notFound || (lastErr.quota && /limit:\s*0/i.test(lastErr.msg || ''))) continue;
+        // sobrecarregado, inexistente ou sem cota grátis ("limit: 0"): tenta o próximo
+        if (lastErr.busy || lastErr.notFound || lastErr.thinking || (lastErr.quota && /limit:\s*0/i.test(lastErr.msg || ''))) continue;
         throw lastErr;
       }
       const d = await r.json();
@@ -662,7 +690,7 @@ Regras:
         : 'O Gemini não devolveu a cifra. Tente de novo.');
       let res;
       try { res = JSON.parse(text); } catch { throw new Error('Resposta da IA em formato inesperado. Tente de novo.'); }
-      if (i > 0) store.set('geminiModels', [model, ...models.filter(m => m !== model)]);
+      if (i > 0) store.set(MODELS_KEY, [model, ...models.filter(m => m !== model)]);
       return { ...res, model, texto: applyChords(lines, res.linhas || []) };
     }
     throw lastErr || new Error('Nenhum modelo gratuito do Gemini disponível para esta chave.');
@@ -690,9 +718,12 @@ Regras:
 
   async function runIA(s, btn, overwriteId) {
     const old = btn ? btn.innerHTML : '';
-    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Gerando a cifra com IA…'; }
+    const show = t => { if (btn && btn.isConnected) btn.innerHTML = `<span class="spin"></span> ${t}`; };
+    if (btn) btn.disabled = true;
+    show('Gerando a cifra com IA…');
+    const slow = setTimeout(() => show('A IA está demorando, aguarde…'), 12000);
     try {
-      const res = await geminiChords(s);
+      const res = await geminiChords(s, show);
       if (!C.hasChords(res.texto)) throw new Error('A IA não devolveu acordes. Tente de novo.');
       const tom = /^[A-G][#b]?m?$/.test(String(res.tom || '').trim()) ? res.tom.trim() : '';
       const saved = saveUserSong({
@@ -708,6 +739,8 @@ Regras:
       console.error(e);
       toast(e.message || 'Erro ao gerar a cifra');
       if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = old; }
+    } finally {
+      clearTimeout(slow);
     }
   }
 
@@ -1397,7 +1430,7 @@ Regras:
 
   views.ia = () => {
     const key = iaKey();
-    const models = store.get('geminiModels', []);
+    const models = store.get(MODELS_KEY, []);
     return {
       tab: 'mais',
       html: `${topbar('Cifras com IA')}
@@ -1443,7 +1476,7 @@ Regras:
         };
         $('[data-act="iaauto"]', el).onchange = e => setSettings({ iaAuto: e.target.checked });
         const del = $('[data-act="iadel"]', el);
-        if (del) del.onclick = () => { store.set('geminiKey', ''); store.set('geminiModels', null); toast('Chave removida'); render(); };
+        if (del) del.onclick = () => { store.set('geminiKey', ''); store.set(MODELS_KEY, null); toast('Chave removida'); render(); };
       }
     };
   };
