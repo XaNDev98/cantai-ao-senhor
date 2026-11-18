@@ -182,6 +182,11 @@ svg.i.fill { fill: currentColor; }
 .cat-ico.off { opacity: .55; }
 .oe-file { cursor: pointer; background: #fff !important; color: var(--paper-ink) !important; border-color: #ddd5c3 !important; }
 .oe-file .i { color: #8a6420; }
+.ia-p { margin: 0; color: #3c4356; font-size: 14px; line-height: 1.55; }
+.ia-p em, .oe-get a { font-style: normal; font-weight: 600; color: #8a6420; }
+.ia-note { display: flex; gap: 8px; align-items: flex-start; margin: 12px 16px 0; padding: 10px 12px; border-radius: 12px; background: rgba(214, 178, 110, .1); border: 1px solid var(--line); color: #d9deea; font-size: 13px; line-height: 1.5; }
+.ia-note .i { color: var(--gold); margin-top: 2px; }
+.ia-note button, .ia-note a { color: var(--gold-2); text-decoration: underline; font-size: inherit; }
 .oe-ok { margin: 14px 16px 0; padding: 12px 14px; border-radius: 13px; background: rgba(214, 178, 110, .1); border: 1px solid var(--line); color: var(--gold-2); font-weight: 600; font-size: 14px; display: flex; gap: 8px; align-items: center; }
 .hscroll { display: flex; gap: 10px; overflow-x: auto; padding: 0 16px 6px; scroll-snap-type: x mandatory; scrollbar-width: none; }
 .hscroll::-webkit-scrollbar { display: none; }

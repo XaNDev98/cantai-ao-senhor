@@ -7,6 +7,7 @@ Funciona no navegador do celular, pode ser **instalado na tela inicial** e conti
 ## Recursos
 
 - **Busca de qualquer música**: procura no acervo e na internet (base aberta de letras [LRCLIB](https://lrclib.net)), por título, trecho ou cantor, ignorando acentos. A letra da internet abre no app e pode virar PPT, ir para o repertório ou favoritas.
+- **Cifra com IA (Gemini, grátis)**: em **Mais › Cifras com IA**, cole uma chave gratuita do [Google AI Studio](https://aistudio.google.com/apikey). Ao abrir a aba **Cifra** de uma música sem cifra, o app envia a letra ao Gemini, recebe só os acordes e em qual palavra de cada linha eles entram, encaixa na letra e salva no aparelho, marcada como “sugerida por IA” (com “Gerar de novo” e “Corrigir”). O app escolhe sozinho um modelo *flash* disponível para a chave e pula modelos sem cota grátis. A chave fica só no aparelho.
 - **Cifra para qualquer música**: quando a música ainda não tem cifra, a aba **Cifra** mostra uma tela limpa para salvá-la uma vez: copie a cifra (de onde quiser) e toque em “Colar cifra copiada”. A partir daí ela abre sempre no app, só letra e acordes, com troca de tom, PPT e sem internet.
 - **Categorias** na ordem da missa: Entrada, Ato Penitencial, Glória, Aclamação, Ofertório, Santo, Cordeiro, Comunhão, Pós-Comunhão, Final, Marianos, Natal…
 - **Letra ou cifra**, com acordes alinhados sobre as sílabas, **transposição de tom**, ajuste do tamanho da letra e leitura clara/escura.

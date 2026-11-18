@@ -514,11 +514,14 @@
    * pessoa) e a partir daí abre sempre aqui, só letra e acordes. */
   function noChordsPanel(s) {
     const canClip = !!(navigator.clipboard && navigator.clipboard.readText);
+    const ia = !!iaKey();
     return `<div class="nochords">
       <span class="nc-ico">${ic('music')}</span>
       <b>Esta música ainda não tem cifra no app</b>
-      <p class="nc-sub">Salve a cifra uma vez e ela passa a aparecer aqui, só letra e acordes, com troca de tom e sem internet.</p>
-      ${canClip ? `<button class="btn gold block" data-act="pastechords">${ic('paste')} Colar cifra copiada</button>` : ''}
+      <p class="nc-sub">${ia ? 'A IA monta a cifra a partir da letra. Depois ela fica salva aqui, com troca de tom e sem internet.' : 'Ative a IA grátis (Gemini) e a cifra aparece aqui sozinha ao abrir esta aba.'}</p>
+      ${ia ? `<button class="btn gold block" data-act="iagen">${ic('music')} Gerar cifra com IA</button>`
+        : `<a class="btn gold block" href="#/ia">${ic('music')} Ativar cifras com IA (grátis)</a>`}
+      ${canClip ? `<button class="btn block" data-act="pastechords">${ic('paste')} Colar cifra copiada</button>` : ''}
       <a class="btn block" href="#/nova?base=${encodeURIComponent(s.id)}">${ic('edit')} ${canClip ? 'Digitar ou colar no editor' : 'Colar a cifra'}</a>
       <a class="nc-link" href="${chordSearchURL(s)}" target="_blank" rel="noopener">Procurar a cifra na internet</a>
     </div>`;
@@ -549,6 +552,163 @@
     setSettings({ modo: 'cifra' });
     toast('Cifra salva!');
     go('#/musica/' + encodeURIComponent(saved.id), true);
+  }
+
+  /* ---------- Cifra com IA (Gemini, chave gratuita da própria pessoa) ----------
+   * A letra vai para o Gemini; ele devolve SÓ os acordes e em qual palavra de
+   * cada linha eles entram. O app encaixa na letra e salva no aparelho, marcada
+   * como "sugerida por IA". A chave fica só neste aparelho. */
+  const GEM = 'https://generativelanguage.googleapis.com/v1beta';
+  const iaKey = () => store.get('geminiKey', '');
+  const iaTried = new Set();
+
+  async function gemError(r) {
+    let msg = '';
+    try { const d = await r.json(); msg = (d.error && d.error.message) || ''; } catch { /* sem corpo */ }
+    if (r.status === 400 && /api key/i.test(msg)) return new Error('Chave do Gemini inválida. Confira em Mais › Cifras com IA.');
+    if (r.status === 401 || r.status === 403) return new Error('A chave do Gemini não tem permissão. Crie uma nova no Google AI Studio.');
+    if (r.status === 429) return Object.assign(new Error('Limite grátis do Gemini atingido. Tente de novo em alguns minutos.'), { quota: true, msg });
+    if (r.status === 404) return Object.assign(new Error('Modelo indisponível'), { notFound: true });
+    return new Error('Gemini respondeu com erro ' + r.status + (msg ? ': ' + msg.slice(0, 120) : ''));
+  }
+
+  /** Modelos "flash" disponíveis para a chave, do melhor para o mais simples. */
+  async function gemModels(key, force) {
+    const cached = store.get('geminiModels', null);
+    if (cached && cached.length && !force) return cached;
+    const r = await fetch(`${GEM}/models?pageSize=200`, { headers: { 'x-goog-api-key': key } });
+    if (!r.ok) throw await gemError(r);
+    const d = await r.json();
+    const names = (d.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => m.name.replace(/^models\//, ''))
+      .filter(n => /^gemini-.*flash/.test(n) && !/(image|tts|audio|live|embed|vision|exp|8b|computer)/.test(n));
+    const score = n => {
+      const v = parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+      return v * 10 - (/lite/.test(n) ? 4 : 0) - (/preview/.test(n) ? 1.5 : 0) + (/latest/.test(n) ? 0.5 : 0);
+    };
+    names.sort((a, b) => score(b) - score(a));
+    const list = names.length ? names.slice(0, 6) : ['gemini-flash-latest', 'gemini-2.5-flash'];
+    store.set('geminiModels', list);
+    return list;
+  }
+
+  const IA_SYS = `Você é um violonista experiente de música católica e cristã brasileira.
+Sua tarefa: dar a cifra (acordes para violão) de uma música a partir da letra fornecida.
+Regras:
+1. Acordes em letras (C D E F G A B), com m, 7, 7M, 9, sus4, °, /baixo. Ex.: G, Em, D/F#, A7M, Bb, C#m7. Nunca use Dó, Ré, Mi.
+2. Para cada linha numerada que leva acorde, informe os acordes e em qual palavra cada um começa (palavra 1 = primeira palavra da linha).
+3. NÃO escreva a letra na resposta; só os números das linhas e os acordes.
+4. Se você conhece a música, siga a harmonia mais tocada, no tom mais comum para violão. Se não conhece, crie uma harmonização simples, coerente e cantável e marque conhecida=false.
+5. Linhas que se repetem (refrão) levam os mesmos acordes.`;
+
+  const IA_SCHEMA = {
+    type: 'OBJECT',
+    properties: {
+      tom: { type: 'STRING' },
+      conhecida: { type: 'BOOLEAN' },
+      linhas: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            n: { type: 'INTEGER' },
+            acordes: {
+              type: 'ARRAY',
+              items: { type: 'OBJECT', properties: { acorde: { type: 'STRING' }, palavra: { type: 'INTEGER' } }, required: ['acorde', 'palavra'] }
+            }
+          },
+          required: ['n', 'acordes']
+        }
+      }
+    },
+    required: ['tom', 'linhas']
+  };
+
+  /** Linhas da letra (sem acordes), mantendo nomes de parte e linhas em branco. */
+  function lyricLines(s) {
+    return C.normalizeSheet(s.texto).split('\n').map(l => C.isLabelLine(l) ? l.trim() : C.stripChords(l));
+  }
+
+  async function geminiChords(s) {
+    const key = iaKey();
+    if (!key) throw new Error('Configure a IA primeiro.');
+    const lines = lyricLines(s);
+    let n = 0;
+    const numbered = lines.map(l => (!l.trim() || C.isLabelLine(l)) ? null : `${++n}: ${l}`).filter(Boolean).join('\n');
+    if (!n) throw new Error('Esta música não tem letra para cifrar.');
+    const body = {
+      systemInstruction: { parts: [{ text: IA_SYS }] },
+      contents: [{ role: 'user', parts: [{ text: `Música: "${s.titulo}"${s.autor ? ' — ' + s.autor : ''}\nLetra (linhas numeradas):\n${numbered}` }] }],
+      generationConfig: { temperature: 0.3, responseMimeType: 'application/json', responseSchema: IA_SCHEMA }
+    };
+    let models = await gemModels(key), lastErr = null;
+    for (let i = 0; i < models.length && i < 4; i++) {
+      const model = models[i];
+      const r = await fetch(`${GEM}/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body)
+      });
+      if (!r.ok) {
+        lastErr = await gemError(r);
+        // modelo sem cota grátis ("limit: 0") ou inexistente: tenta o próximo
+        if (lastErr.notFound || (lastErr.quota && /limit:\s*0/i.test(lastErr.msg || ''))) continue;
+        throw lastErr;
+      }
+      const d = await r.json();
+      const cand = (d.candidates || [])[0];
+      const text = cand && cand.content && (cand.content.parts || []).map(p => p.text || '').join('');
+      if (!text) throw new Error(cand && cand.finishReason === 'RECITATION'
+        ? 'O Gemini não quis gerar a cifra desta música. Tente "Gerar de novo" ou cole a cifra.'
+        : 'O Gemini não devolveu a cifra. Tente de novo.');
+      let res;
+      try { res = JSON.parse(text); } catch { throw new Error('Resposta da IA em formato inesperado. Tente de novo.'); }
+      if (i > 0) store.set('geminiModels', [model, ...models.filter(m => m !== model)]);
+      return { ...res, model, texto: applyChords(lines, res.linhas || []) };
+    }
+    throw lastErr || new Error('Nenhum modelo gratuito do Gemini disponível para esta chave.');
+  }
+
+  /** Encaixa os acordes (linha n, palavra k) na letra. */
+  function applyChords(lines, linhas) {
+    const map = new Map();
+    for (const l of linhas) map.set(l.n | 0, (l.acordes || []).filter(a => a && C.isChordLine(String(a.acorde || '').trim())));
+    let n = 0;
+    return lines.map(line => {
+      if (!line.trim() || C.isLabelLine(line)) return line;
+      n++;
+      const acs = (map.get(n) || []).slice().sort((a, b) => (a.palavra | 0) - (b.palavra | 0));
+      if (!acs.length) return line;
+      const starts = [...line.matchAll(/\S+/g)].map(m => m.index);
+      let out = line;
+      for (const a of acs.reverse()) {
+        const k = Math.min(Math.max(1, a.palavra | 0), starts.length);
+        out = out.slice(0, starts[k - 1]) + `[${String(a.acorde).trim()}]` + out.slice(starts[k - 1]);
+      }
+      return out;
+    }).join('\n');
+  }
+
+  async function runIA(s, btn, overwriteId) {
+    const old = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Gerando a cifra com IA…'; }
+    try {
+      const res = await geminiChords(s);
+      if (!C.hasChords(res.texto)) throw new Error('A IA não devolveu acordes. Tente de novo.');
+      const tom = /^[A-G][#b]?m?$/.test(String(res.tom || '').trim()) ? res.tom.trim() : '';
+      const saved = saveUserSong({
+        titulo: s.titulo, categoria: s.categoria || 'outros', tom, autor: s.autor || '', texto: res.texto, ia: true,
+        fonte: `Cifra sugerida por IA (${res.model})${res.conhecida === false ? ' · harmonização criada' : ''} — confira antes de tocar`
+      }, overwriteId || (isUser(s) ? s.id : undefined));
+      replaceRefs(s.id, saved.id);
+      store.set('tr:' + saved.id, 0);
+      setSettings({ modo: 'cifra' });
+      toast(res.conhecida === false ? 'Cifra criada pela IA (música pouco conhecida)' : 'Cifra pronta!');
+      go('#/musica/' + encodeURIComponent(saved.id), true);
+    } catch (e) {
+      console.error(e);
+      toast(e.message || 'Erro ao gerar a cifra');
+      if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = old; }
+    }
   }
 
   views.musica = ([id]) => {
@@ -584,6 +744,8 @@
           <div class="tool icon"><button data-act="paper" aria-label="Alternar fundo da leitura">${ic(settings().papel === 'escuro' ? 'sun' : 'moon', 'sm')}</button></div>
           <div class="tool icon"><button data-act="fav" aria-label="Favoritar" aria-pressed="${isFav(s.id)}">${isFav(s.id) ? `<svg class="i sm fill fav-on" viewBox="0 0 24 24">${P.star}</svg>` : ic('star', 'sm')}</button></div>
         </div>
+        ${mode === 'cifra' && s.ia ? `<div class="ia-note">${ic('info', 'sm')}<span>Cifra sugerida por IA: pode ter acordes errados.
+          <button data-act="iaregen">Gerar de novo</button> · <a href="#/editar/${encodeURIComponent(s.id)}">Corrigir</a></span></div>` : ''}
         ${mode === 'cifra' ? `<div class="cstrip-head"><span>Acordes</span><button data-act="diag">${settings().diag === false ? 'Mostrar desenhos' : 'Ocultar desenhos'}</button></div>
           ${settings().diag === false ? '' : '<div class="cstrip" data-cstrip></div>'}` : ''}
         <article class="paper ${mode === 'letra' ? 'lyrics' : ''} ${settings().papel === 'escuro' ? 'dark' : ''}" style="--fs:${settings().fs}px">
@@ -621,6 +783,14 @@
           if (fav) fav.onclick = () => { toast(toggleFav(s.id) ? 'Adicionada às favoritas' : 'Removida das favoritas'); refresh(); };
           const paste = $('[data-act="pastechords"]', wrap);
           if (paste) paste.onclick = () => pasteChords(s, paste);
+          // IA: gera sozinha ao abrir a aba Cifra (uma vez por música), ou pelo botão
+          const iagen = $('[data-act="iagen"]', wrap);
+          if (iagen) {
+            iagen.onclick = () => runIA(s, iagen);
+            if (settings().iaAuto !== false && !iaTried.has(s.id)) { iaTried.add(s.id); runIA(s, iagen); }
+          }
+          const iaregen = $('[data-act="iaregen"]', wrap);
+          if (iaregen) iaregen.onclick = () => runIA(s, iaregen, s.id);
           const diag = $('[data-act="diag"]', wrap);
           if (diag) diag.onclick = () => { setSettings({ diag: settings().diag === false }); refresh(); };
           // toque num acorde da cifra: mostra o desenho
@@ -1173,10 +1343,11 @@
       categoria: data.categoria || 'outros',
       tom: (data.tom || '').trim() || (C.hasChords(data.texto) ? C.firstChord(data.texto) : ''),
       autor: (data.autor || '').trim(),
-      fonte: 'Cadastrada por você',
+      fonte: data.fonte || 'Cadastrada por você',
       idioma: 'pt',
       texto: C.normalizeSheet(data.texto).trim()
     };
+    if (data.ia) song.ia = true;          // cifra sugerida pela IA (mostra o aviso "confira")
     const i = list.findIndex(x => x.id === song.id);
     if (i >= 0) list[i] = song; else list.push(song);
     if (!store.set('userSongs', list)) toast('Sem espaço para salvar neste aparelho');
@@ -1224,6 +1395,57 @@
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; });
   const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
 
+  views.ia = () => {
+    const key = iaKey();
+    const models = store.get('geminiModels', []);
+    return {
+      tab: 'mais',
+      html: `${topbar('Cifras com IA')}
+      <div class="oe-get">
+        <b>${key ? 'IA ativada neste aparelho' : 'Cifra automática com o Gemini (grátis)'}</b>
+        <p class="ia-p">Ao abrir a aba <em>Cifra</em> de uma música sem cifra, o app pede ao Gemini (IA do Google) os acordes e monta a cifra na letra. Ela fica salva no aparelho, com troca de tom, desenhos dos acordes e PPT.</p>
+        ${key ? `<p class="ia-p">Modelo em uso: <em>${esc(models[0] || 'escolhido no primeiro uso')}</em></p>` : `
+        <ol>
+          <li>Abra o <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> e entre com sua conta Google.</li>
+          <li>Toque em <em>Criar chave de API</em> (Create API key) e copie a chave.</li>
+          <li>Cole abaixo e toque em <em>Salvar e testar</em>.</li>
+        </ol>`}
+      </div>
+      <form class="form" id="f" style="margin-top:12px">
+        <div class="field"><label for="k">Chave do Gemini</label>
+          <input id="k" name="key" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…" value="${esc(key)}">
+          <p class="help">A chave fica guardada só neste aparelho. Ao gerar uma cifra, a letra da música é enviada ao Google. No plano grátis há limite de pedidos por minuto e por dia.</p></div>
+        <button class="btn gold block">${ic('check')} Salvar e testar</button>
+        <label class="tg" style="color:var(--text)"><span>Gerar sozinha ao abrir a aba Cifra<small style="color:var(--muted)">Desligado: aparece um botão para gerar</small></span>
+          <span class="switch"><input type="checkbox" data-act="iaauto" ${settings().iaAuto !== false ? 'checked' : ''}><span></span></span></label>
+        ${key ? `<button type="button" class="btn small danger block" data-act="iadel">${ic('trash', 'sm')} Remover a chave deste aparelho</button>` : ''}
+      </form>`,
+      after(el) {
+        const f = $('#f', el);
+        f.onsubmit = async e => {
+          e.preventDefault();
+          const k = f.key.value.trim();
+          if (!/^[\w-]{20,}$/.test(k)) return toast('Cole a chave inteira (começa com "AIza…")');
+          const btn = $('button.gold', f), old = btn.innerHTML;
+          btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Testando…';
+          try {
+            store.set('geminiKey', k);
+            const list = await gemModels(k, true);
+            toast('IA pronta! Modelo: ' + list[0]);
+            render();
+          } catch (err) {
+            store.set('geminiKey', '');
+            toast(err.message || 'Não consegui usar essa chave');
+            btn.disabled = false; btn.innerHTML = old;
+          }
+        };
+        $('[data-act="iaauto"]', el).onchange = e => setSettings({ iaAuto: e.target.checked });
+        const del = $('[data-act="iadel"]', el);
+        if (del) del.onclick = () => { store.set('geminiKey', ''); store.set('geminiModels', null); toast('Chave removida'); render(); };
+      }
+    };
+  };
+
   views.mais = () => {
     const n = userSongs().length;
     return {
@@ -1233,6 +1455,7 @@
         <a href="#/nova">${ic('plus')}<span>Adicionar música<small>Cadastre os cantos da sua comunidade</small></span>${ic('chev', 'sm')}</a>
         <a href="#/minhas">${ic('folder')}<span>Minhas músicas<small>${n} ${n === 1 ? 'cadastrada' : 'cadastradas'} neste aparelho</small></span>${ic('chev', 'sm')}</a>
         <a href="#/colar">${ic('paste')}<span>Colar letra e gerar PPT</span>${ic('chev', 'sm')}</a>
+        <a href="#/ia">${ic('music')}<span>Cifras com IA (Gemini)<small>${iaKey() ? 'Ativada neste aparelho' : 'Grátis: a cifra aparece sozinha'}</small></span>${ic('chev', 'sm')}</a>
         <a href="#/oracoes">${ic('cross')}<span>Orações Eucarísticas</span>${ic('chev', 'sm')}</a>
         <a href="#/historico">${ic('clock')}<span>Histórico</span>${ic('chev', 'sm')}</a>
         <a href="#/buscar">${ic('search')}<span>Buscar</span>${ic('chev', 'sm')}</a>

@@ -399,7 +399,7 @@
   }
 
   window.Cantai = {
-    THEMES, parseSong, normalizeSheet, cleanPasted, stripChords, hasChords, firstChord,
+    THEMES, parseSong, normalizeSheet, cleanPasted, stripChords, isLabelLine: t => !!labelOf(String(t || '').trim()), hasChords, firstChord,
     transposeChord, transposeKey, useFlats, isChordLine,
     buildSlides, fitSize, backgroundURL, makePptx, loadLib, slug
   };
