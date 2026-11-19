@@ -198,6 +198,34 @@ svg.i.fill { fill: currentColor; }
 .nuvem-box a, .nuvem-box button { flex: none; color: var(--gold-2); font-weight: 600; text-decoration: underline; font-size: 13px; }
 .ppt-dica { margin: 2px 2px 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
 .ppt-dica b { color: var(--text); }
+/* editor visual de PowerPoint */
+.ed-stage { position: sticky; top: calc(61px + var(--safe-t)); z-index: 5; margin-top: 12px; padding-bottom: 6px; background: var(--bg); }
+.ed-strip { display: flex; gap: 8px; overflow-x: auto; padding: 8px 16px 4px; scrollbar-width: thin; }
+.ed-th { position: relative; flex: none; width: 112px; border-radius: 8px; padding: 0; box-shadow: 0 0 0 1px rgba(255, 255, 255, .1); overflow: hidden; }
+.ed-th .sl { border-radius: 8px; box-shadow: none; pointer-events: none; }
+.ed-th.on { box-shadow: 0 0 0 2.5px var(--gold); }
+.ed-th .num { position: absolute; left: 5px; top: 4px; font: 600 10px/1 var(--sans); color: #fff; background: rgba(0, 0, 0, .5); padding: 3px 5px; border-radius: 5px; }
+.ed-add { aspect-ratio: 16 / 9; display: grid; place-items: center; color: var(--gold); background: var(--card); border: 1.5px dashed var(--line); box-shadow: none; }
+.ed-bar { display: flex; align-items: center; gap: 2px; padding: 4px 12px 0 16px; color: var(--muted); font-size: 13px; }
+.ed-bar span { flex: 1; }
+.ed-bar b { color: var(--text); }
+.ed-bar .ib:disabled { opacity: .3; }
+.seg.ed-tabs { grid-template-columns: repeat(3, 1fr); }
+.ed-panel { margin: 12px 16px 0; padding: 14px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line-soft); display: grid; gap: 10px; }
+.ed-panel .field textarea { min-height: 0; height: auto; font-family: var(--sans); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; line-height: 1.5; }
+.ed-panel .swatches { padding: 0; }
+.ed-panel .sw { color: var(--muted); }
+.ed-panel .sw.on { color: var(--text); }
+.ed-lbl { font-size: 12.5px; color: var(--muted); }
+.ed-lbl b { color: var(--text); font-weight: 600; }
+.ed-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ed-row .range { flex: 1; min-width: 140px; }
+.ed-ctl { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.ed-ctl select { height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-2); color: var(--text); padding: 0 8px; }
+.ed-ctl input[type=color] { width: 44px; height: 34px; border: 1px solid var(--line); border-radius: 10px; background: none; padding: 2px; }
+.seg.ed-seg { margin: 0; flex: 1; min-width: 120px; }
+.seg.ed-seg3 { margin: 0; grid-template-columns: repeat(3, 1fr); }
+.ed-seg button, .ed-seg3 button { height: 34px; font-size: 13.5px; }
 .ppt-ed-sl { display: grid; gap: 10px; padding: 12px; border-radius: 14px; background: var(--card); border: 1px solid var(--line-soft); }
 .ppt-ed-h { font: 600 11.5px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
 .ppt-edit .field textarea { min-height: 0; height: auto; overflow-wrap: anywhere; overflow-x: hidden; line-height: 1.5; font-family: var(--sans); font-size: 15px; white-space: pre-wrap; }

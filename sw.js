@@ -1,5 +1,5 @@
 /* Service worker: o app funciona sem internet depois da primeira visita. */
-const VERSION = 'cantai-v16';
+const VERSION = 'cantai-v17';
 const SHELL = [
   './',
   'index.html',
@@ -9,6 +9,7 @@ const SHELL = [
   'js/pptlib.js',
   'js/nuvem-config.js',
   'js/nuvem.js',
+  'js/editor.js',
   'vendor/supabase.js',
   'js/app.js',
   'vendor/pptxgen.bundle.js',

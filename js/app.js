@@ -1556,6 +1556,7 @@ Regras:
         <b>Sua biblioteca de apresentações</b>
         <p class="ia-p">Guarde aqui os PPTs prontos da comunidade. O app lê o texto dos slides: eles aparecem na busca, podem ser apresentados, editados e virar música do acervo.</p>
         <label class="btn gold block ppt-up">${ic('upload')} Enviar PPTs<input type="file" multiple accept=".pptx,.ppt,.ppsx,.pps,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint" hidden data-act="pptfiles"></label>
+        <a class="btn block" href="#/editor/novo">${ic('plus')} Criar um PPT do zero</a>
         <small data-uso>Os arquivos ficam guardados neste aparelho.</small>
       </div>
       <div class="nuvem-box" data-nuvem></div>
@@ -1651,8 +1652,9 @@ Regras:
               <button class="btn stack" data-act="show" ${temTexto ? '' : 'disabled'}>${ic('expand')}Apresentar</button>
               <button class="btn stack" data-act="share">${ic('share')}Compartilhar</button>
             </div>
+            ${it.erro && !temTexto ? '' : `<a class="btn gold block" href="#/editor/${encodeURIComponent(it.id)}">${ic('layers')} Editar PowerPoint (fundo, letra, slides)</a>`}
             <div class="row3" style="grid-template-columns:1fr 1fr">
-              ${temTexto ? `<a class="btn gold" href="#/ppts/${encodeURIComponent(it.id)}?editar=1">${ic('edit')} Editar textos</a>` : '<span></span>'}
+              ${temTexto ? `<a class="btn" href="#/ppts/${encodeURIComponent(it.id)}?editar=1">${ic('edit')} Só os textos</a>` : '<span></span>'}
               <label class="btn ppt-up">${ic('upload')} Substituir arquivo<input type="file" accept=".pptx,.ppt,.ppsx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint" hidden data-act="replace"></label>
             </div>
             ${temTexto ? `<button class="btn block" data-act="tosong">${ic('music')} Salvar como música do acervo</button>` : ''}
@@ -1723,6 +1725,188 @@ Regras:
       }
     };
   }
+
+  /* ---------- Editor visual de PowerPoint (fundo, letra, slides) ---------- */
+  views.editor = ([id]) => ({
+    tab: '',
+    html: `${topbar('Editar PowerPoint')}<div id="ved"><div class="hint loading"><span class="spin"></span> Preparando os slides…</div></div>`,
+    async after(el) {
+      const SE = window.SlideEditor;
+      const box = $('#ved', el);
+      let it = null, deck, nome;
+      try {
+        if (id === 'novo') {
+          nome = 'Nova apresentação';
+          deck = { slides: [SE.novoSlide({ texto: 'Título da apresentação' }), SE.novoSlide({ texto: 'Escreva aqui a letra\ndo seu slide' })], imgs: {} };
+        } else {
+          it = await PptLib.get(id);
+          if (!it) { box.innerHTML = emptyState('slides', 'PPT não encontrado', '', `<a class="btn" href="#/ppts">Voltar</a>`); return; }
+          nome = it.nome;
+          deck = it.deck ? JSON.parse(JSON.stringify(it.deck)) : await SE.deckFromPpt(it, await ensureBlob(it));
+          deck.imgs = deck.imgs || {};
+        }
+      } catch (e) { console.error(e); box.innerHTML = emptyState('slides', 'Não foi possível abrir no editor', esc(e.message), `<a class="btn" href="#/ppts">Voltar</a>`); return; }
+      if (!box.isConnected) return;
+      $('.topbar h1', el).textContent = 'Editar: ' + nome;
+
+      let cur = 0, aba = 'texto', mudou = false;
+      const S = () => deck.slides[cur];
+      const temaIds = ['noite', 'comum', 'roxo', 'festa', 'vermelho', 'aurora', 'preto', 'branco', 'azul'];
+      const temOriginal = deck.slides.some(s => s.bg && s.bg.tipo === 'original');
+      const origImg = (deck.slides.find(s => s.bg && s.bg.tipo === 'original') || {}).bg;
+
+      const thumbs = () => deck.slides.map((s, i) => `<button class="ed-th ${i === cur ? 'on' : ''}" data-th="${i}">${SE.slideHTML(s, 320, deck.imgs)}<span class="num">${i + 1}</span></button>`).join('')
+        + `<button class="ed-th ed-add" data-act="add" aria-label="Novo slide">${ic('plus', 'lg')}</button>`;
+      const seg = (k, v, rotulo) => `<button class="${S()[k] === v ? 'on' : ''}" data-set="${k}" data-v="${v}">${rotulo}</button>`;
+      function painel() {
+        const s = S(), bg = s.bg || {};
+        if (aba === 'texto') return `<div class="field"><label for="edt">Texto do slide ${cur + 1}</label>
+            <textarea id="edt" rows="7" placeholder="Uma linha por linha do slide">${esc(s.texto)}</textarea></div>`;
+        if (aba === 'fundo') return `
+          <div class="ed-lbl">Temas</div>
+          <div class="swatches">
+            ${temOriginal ? `<button class="sw ${bg.tipo === 'original' ? 'on' : ''}" data-bg="original"><i style="${SE.bgCSS(origImg, 160, deck.imgs)}"></i>Original</button>` : ''}
+            ${temaIds.map(t => `<button class="sw ${bg.tipo === 'tema' && bg.tema === t ? 'on' : ''}" data-bg="tema" data-tema="${t}"><i style="${SE.bgCSS({ tipo: 'tema', tema: t }, 160)}"></i>${esc(C.THEMES[t].nome)}</button>`).join('')}
+          </div>
+          <div class="ed-row">
+            <label class="ed-ctl">Cor sólida <input type="color" data-bgcor value="${bg.tipo === 'cor' ? bg.cor : '#0b1630'}"></label>
+            <label class="btn small ppt-up">${ic('image', 'sm')} Usar uma foto<input type="file" accept="image/*" hidden data-bgimg></label>
+          </div>
+          ${bg.tipo === 'imagem' || bg.tipo === 'original' ? `<label class="ed-lbl">Escurecer a imagem</label><input class="range" type="range" min="0" max="0.85" step="0.05" value="${bg.escurecer || 0}" data-escurecer>` : ''}`;
+        return `
+          <div class="ed-row"><label class="ed-ctl">Fonte <select data-fonte>${SE.FONTES.map(f => `<option ${f === s.fonte ? 'selected' : ''} style="font-family:'${f}'">${f}</option>`).join('')}</select></label>
+            <label class="ed-ctl">Cor <input type="color" data-cor value="${s.cor}"></label></div>
+          <div class="ed-lbl">Tamanho: <b data-tamlbl>${s.tamanho ? s.tamanho + ' pt' : 'automático'}</b></div>
+          <div class="ed-row"><input class="range" type="range" min="0" max="80" step="2" value="${s.tamanho || 0}" data-tam><button class="btn small" data-tamauto>Auto</button></div>
+          <div class="ed-row">
+            <div class="seg ed-seg">${seg('negrito', true, '<b>N</b>')}${seg('negrito', false, 'Normal')}</div>
+            <div class="seg ed-seg">${seg('italico', true, '<i>I</i>')}${seg('italico', false, 'Reto')}</div>
+          </div>
+          <div class="ed-lbl">Alinhamento</div>
+          <div class="seg ed-seg3">${seg('alinhar', 'left', 'Esquerda')}${seg('alinhar', 'center', 'Centro')}${seg('alinhar', 'right', 'Direita')}</div>
+          <div class="ed-lbl">Posição</div>
+          <div class="seg ed-seg3">${seg('vertical', 'top', 'Em cima')}${seg('vertical', 'middle', 'Meio')}${seg('vertical', 'bottom', 'Embaixo')}</div>`;
+      }
+      function tela() {
+        box.innerHTML = `
+          <div class="stage ed-stage">${SE.slideHTML(S(), 960, deck.imgs)}</div>
+          <div class="ed-strip">${thumbs()}</div>
+          <div class="ed-bar">
+            <span>Slide <b>${cur + 1}</b> de ${deck.slides.length}</span>
+            <button class="ib" data-act="esq" aria-label="Mover para a esquerda" ${cur ? '' : 'disabled'}>${ic('back', 'sm')}</button>
+            <button class="ib" data-act="dir" aria-label="Mover para a direita" ${cur < deck.slides.length - 1 ? '' : 'disabled'}>${ic('chev', 'sm')}</button>
+            <button class="ib" data-act="dup" aria-label="Duplicar slide">${ic('layers', 'sm')}</button>
+            <button class="ib" data-act="del" aria-label="Apagar slide" ${deck.slides.length > 1 ? '' : 'disabled'}>${ic('trash', 'sm')}</button>
+          </div>
+          <div class="seg ed-tabs">
+            <button class="${aba === 'texto' ? 'on' : ''}" data-aba="texto">Texto</button>
+            <button class="${aba === 'fundo' ? 'on' : ''}" data-aba="fundo">Fundo</button>
+            <button class="${aba === 'letra' ? 'on' : ''}" data-aba="letra">Letra</button>
+          </div>
+          <div class="ed-panel">${painel()}</div>
+          <div class="actions">
+            <button class="btn block" data-act="todos">${ic('check', 'sm')} Aplicar ${aba === 'texto' ? 'fundo e letra' : aba === 'fundo' ? 'este fundo' : 'esta letra'} a todos os slides</button>
+            ${it ? `<button class="btn gold block" data-act="salvar">${ic('check')} Salvar</button>
+            <button class="btn block" data-act="copia">${ic('folder')} Salvar como novo PPT (mantém o original)</button>`
+              : `<button class="btn gold block" data-act="copia">${ic('check')} Salvar na biblioteca</button>`}
+            <button class="btn small block" data-act="apresentar">${ic('expand', 'sm')} Ver em tela cheia</button>
+          </div>`;
+        ligar();
+      }
+      // atualiza só a prévia e a miniatura (enquanto digita/arrasta)
+      function prever() {
+        mudou = true;
+        const st = $('.ed-stage', box); if (st) st.innerHTML = SE.slideHTML(S(), 960, deck.imgs);
+        const th = $(`[data-th="${cur}"]`, box); if (th) th.innerHTML = SE.slideHTML(S(), 320, deck.imgs) + `<span class="num">${cur + 1}</span>`;
+      }
+      function ligar() {
+        $$('[data-th]', box).forEach(b => b.onclick = () => { cur = +b.dataset.th; tela(); });
+        $$('[data-aba]', box).forEach(b => b.onclick = () => { aba = b.dataset.aba; tela(); });
+        const act = (n, fn) => { const b = $(`[data-act="${n}"]`, box); if (b) b.onclick = fn; };
+        act('add', () => { const base = S(); deck.slides.splice(cur + 1, 0, SE.novoSlide({ bg: base.bg, fonte: base.fonte, tamanho: base.tamanho, cor: base.cor, negrito: base.negrito, italico: base.italico, alinhar: base.alinhar, vertical: base.vertical })); cur++; aba = 'texto'; mudou = true; tela(); setTimeout(() => { const t = $('#edt', box); t && t.focus(); }, 50); });
+        act('dup', () => { deck.slides.splice(cur + 1, 0, JSON.parse(JSON.stringify(S()))); cur++; mudou = true; tela(); });
+        act('del', () => { if (deck.slides.length > 1 && confirm(`Apagar o slide ${cur + 1}?`)) { deck.slides.splice(cur, 1); cur = Math.min(cur, deck.slides.length - 1); mudou = true; tela(); } });
+        act('esq', () => { if (cur > 0) { [deck.slides[cur - 1], deck.slides[cur]] = [deck.slides[cur], deck.slides[cur - 1]]; cur--; mudou = true; tela(); } });
+        act('dir', () => { if (cur < deck.slides.length - 1) { [deck.slides[cur + 1], deck.slides[cur]] = [deck.slides[cur], deck.slides[cur + 1]]; cur++; mudou = true; tela(); } });
+        act('todos', () => {
+          const s = S();
+          const campos = aba === 'fundo' ? ['bg'] : aba === 'letra' ? ['fonte', 'tamanho', 'cor', 'negrito', 'italico', 'alinhar', 'vertical'] : ['bg', 'fonte', 'tamanho', 'cor', 'negrito', 'italico', 'alinhar', 'vertical'];
+          deck.slides.forEach(o => campos.forEach(k => { o[k] = JSON.parse(JSON.stringify(s[k])); }));
+          mudou = true; tela(); toast('Aplicado a todos os slides');
+        });
+        act('apresentar', async () => {
+          const imgs = await Promise.all(deck.slides.map(s => SE.slideHTML(s, 1920, deck.imgs)));
+          const ov = document.createElement('div');
+          ov.className = 'show';
+          let i = cur;
+          const draw = () => { ov.innerHTML = imgs[i] + `<div class="hud"><button class="ib" data-x>${ic('x')}</button><span>${i + 1} / ${imgs.length}</span><span style="width:44px"></span></div>`; $('[data-x]', ov).onclick = e => { e.stopPropagation(); ov.remove(); }; };
+          ov.onclick = e => { if (e.target.closest('.hud')) return; if (e.clientX > innerWidth / 3) { if (i < imgs.length - 1) i++; } else if (i > 0) i--; draw(); };
+          document.body.appendChild(ov); draw();
+        });
+        // texto
+        const t = $('#edt', box); if (t) t.oninput = () => { S().texto = t.value; prever(); };
+        // fundo
+        $$('[data-bg]', box).forEach(b => b.onclick = () => {
+          const s = S();
+          if (b.dataset.bg === 'original') s.bg = JSON.parse(JSON.stringify(origImg));
+          else s.bg = { tipo: 'tema', tema: b.dataset.tema, escurecer: 0.35 };
+          s.cor = SE.corParaFundo(s.bg); mudou = true; tela();
+        });
+        const bc = $('[data-bgcor]', box); if (bc) bc.oninput = () => { const s = S(); s.bg = { tipo: 'cor', cor: bc.value }; s.cor = SE.corParaFundo(s.bg); prever(); };
+        if (bc) bc.onchange = () => tela();
+        const bi = $('[data-bgimg]', box); if (bi) bi.onchange = async e => {
+          const f = e.target.files[0]; if (!f) return;
+          try {
+            const url = await PptLib.toDataURL(f);
+            const k = 'u' + Date.now().toString(36);
+            deck.imgs[k] = url;
+            S().bg = { tipo: 'imagem', img: k, escurecer: 0.4 }; S().cor = '#FFFFFF'; mudou = true; tela();
+          } catch { toast('Não consegui abrir essa imagem'); }
+        };
+        const esq = $('[data-escurecer]', box); if (esq) esq.oninput = () => { S().bg.escurecer = +esq.value; prever(); };
+        // letra
+        const fo = $('[data-fonte]', box); if (fo) fo.onchange = () => { S().fonte = fo.value; prever(); };
+        const co = $('[data-cor]', box); if (co) co.oninput = () => { S().cor = co.value; prever(); };
+        const tam = $('[data-tam]', box), tl = $('[data-tamlbl]', box);
+        if (tam) tam.oninput = () => { S().tamanho = +tam.value; tl.textContent = S().tamanho ? S().tamanho + ' pt' : 'automático'; prever(); };
+        act('tamauto', () => { S().tamanho = 0; tela(); });
+        $$('[data-set]', box).forEach(b => b.onclick = () => {
+          const v = b.dataset.v === 'true' ? true : b.dataset.v === 'false' ? false : b.dataset.v;
+          S()[b.dataset.set] = v; mudou = true; tela();
+        });
+        // salvar
+        const salvar = async (comoNovo, btn) => {
+          const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Gerando o PowerPoint…';
+          try {
+            const blob = await SE.toPptx(deck, nome);
+            await nuvemCheck();
+            let alvo;
+            if (comoNovo || !it) {
+              const base = it ? nome + ' (editado)' : nome;
+              const meta = await PptLib.add(new File([blob], base + '.pptx', { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }));
+              alvo = meta.id;
+            } else {
+              await PptLib.replaceFile(it.id, blob, it.arquivo && /\.pptx$/i.test(it.arquivo) ? it.arquivo : nome + '.pptx');
+              alvo = it.id;
+            }
+            await PptLib.update(alvo, { deck });
+            let msg = comoNovo || !it ? 'Novo PPT salvo na biblioteca' : 'PowerPoint salvo';
+            if (online()) { try { if (await pushNuvem(alvo)) msg += ' e enviado para todos'; } catch (e) { msg += ' (só neste aparelho: ' + e.message + ')'; } }
+            mudou = false; toast(msg);
+            go('#/ppts/' + encodeURIComponent(alvo), true);
+          } catch (e) {
+            console.error(e); toast(e.message || 'Não consegui salvar'); btn.disabled = false; btn.innerHTML = old;
+          }
+        };
+        act('salvar', e => salvar(false, e.currentTarget));
+        act('copia', e => salvar(true, e.currentTarget));
+      }
+      tela();
+      // aviso ao sair sem salvar
+      const back = $('[data-act="back"]', el);
+      if (back) back.onclick = () => { if (!mudou || confirm('Sair sem salvar as alterações?')) history.length > 1 ? history.back() : go('#/ppts'); };
+    }
+  });
 
   /** Editor: um campo por slide; grava no próprio .pptx mantendo fundo e formatação. */
   function pptEditor(id) {

@@ -160,6 +160,113 @@
     return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', compression: 'DEFLATE' });
   }
 
+  /* ---------- fundo original de cada slide (imagem ou cor) ---------- */
+  const NS_P = 'http://schemas.openxmlformats.org/presentationml/2006/main';
+  const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const relsPath = p => p.replace(/([^/]+)$/, '_rels/$1.rels');
+  const resolve = (base, target) => {
+    if (target.startsWith('/')) return target.slice(1);
+    const parts = base.split('/'); parts.pop();
+    for (const seg of target.split('/')) { if (seg === '..') parts.pop(); else if (seg !== '.') parts.push(seg); }
+    return parts.join('/');
+  };
+  async function readRels(zip, path) {
+    const f = zip.file(relsPath(path));
+    const map = {};
+    if (!f) return map;
+    const x = new DOMParser().parseFromString(await f.async('string'), 'application/xml');
+    for (const r of x.getElementsByTagName('Relationship')) map[r.getAttribute('Id')] = { target: resolve(path, r.getAttribute('Target')), type: r.getAttribute('Type') || '' };
+    return map;
+  }
+  const blipId = el => { const b = el && el.getElementsByTagNameNS(NS_A, 'blip')[0]; return b && (b.getAttributeNS(NS_R, 'embed') || b.getAttribute('r:embed')); };
+  const solid = el => {
+    const c = el && el.getElementsByTagNameNS(NS_A, 'srgbClr')[0];
+    return c ? '#' + c.getAttribute('val') : '';
+  };
+
+  /** Imagem → dataURL JPEG reduzida (máx. 1920 px) para usar como fundo. */
+  async function toDataURL(blob) {
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      const s = Math.min(1, 1920 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * s)); c.height = Math.max(1, Math.round(img.height * s));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.85);
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  /**
+   * Fundo de cada slide: { img: dataURL } ou { cor: '#RRGGBB' } ou null.
+   * Procura no slide, depois no layout e no mestre; também aceita uma
+   * imagem que cubra a maior parte do slide.
+   */
+  async function backgrounds(blob) {
+    await window.Cantai.loadLib();
+    const zip = await window.JSZip.loadAsync(blob);
+    let sw = 12192000, sh = 6858000;
+    try {
+      const pres = new DOMParser().parseFromString(await zip.file('ppt/presentation.xml').async('string'), 'application/xml');
+      const sz = pres.getElementsByTagNameNS(NS_P, 'sldSz')[0];
+      if (sz) { sw = +sz.getAttribute('cx') || sw; sh = +sz.getAttribute('cy') || sh; }
+    } catch { /* tamanho padrão 16:9 */ }
+    const cache = new Map();
+    const media = async target => {
+      if (cache.has(target)) return cache.get(target);
+      const f = zip.file(target);
+      let v = null;
+      if (f && /\.(png|jpe?g|gif|bmp|webp)$/i.test(target)) {
+        try { v = await toDataURL(new Blob([await f.async('arraybuffer')], { type: /png$/i.test(target) ? 'image/png' : 'image/jpeg' })); } catch { v = null; }
+      }
+      cache.set(target, v);
+      return v;
+    };
+    // fundo declarado em <p:bg> de uma parte (slide, layout ou mestre)
+    async function bgOf(path) {
+      const f = zip.file(path);
+      if (!f) return null;
+      const x = new DOMParser().parseFromString(await f.async('string'), 'application/xml');
+      const rels = await readRels(zip, path);
+      const bg = x.getElementsByTagNameNS(NS_P, 'bg')[0];
+      if (bg) {
+        const id = blipId(bg);
+        if (id && rels[id]) { const img = await media(rels[id].target); if (img) return { img }; }
+        const cor = solid(bg);
+        if (cor) return { cor };
+      }
+      // imagem que cobre 60%+ do slide (muito comum em PPT de igreja)
+      let best = null, area = 0;
+      for (const pic of x.getElementsByTagNameNS(NS_P, 'pic')) {
+        const ext = pic.getElementsByTagNameNS(NS_A, 'ext')[0];
+        const a = ext ? (+ext.getAttribute('cx')) * (+ext.getAttribute('cy')) : 0;
+        if (a > area) { area = a; best = pic; }
+      }
+      if (best && area >= sw * sh * 0.6) {
+        const id = blipId(best);
+        if (id && rels[id]) { const img = await media(rels[id].target); if (img) return { img }; }
+      }
+      return { rels };
+    }
+    const out = [];
+    for (const path of await slideOrder(zip)) {
+      let r = await bgOf(path);
+      if (r && (r.img || r.cor)) { out.push(r); continue; }
+      const layout = r && Object.values(r.rels || {}).find(x => /slideLayout$/.test(x.type));
+      let found = null;
+      if (layout) {
+        const rl = await bgOf(layout.target);
+        if (rl && (rl.img || rl.cor)) found = rl;
+        else {
+          const master = rl && Object.values(rl.rels || {}).find(x => /slideMaster$/.test(x.type));
+          if (master) { const rm = await bgOf(master.target); if (rm && (rm.img || rm.cor)) found = rm; }
+        }
+      }
+      out.push(found ? (found.img ? { img: found.img } : { cor: found.cor }) : null);
+    }
+    return out;
+  }
+
   /** Caminhos dos slides na ordem em que aparecem na apresentação. */
   async function slideOrder(zip) {
     // ordem real dos slides: presentation.xml (sldIdLst) + relações
@@ -283,5 +390,5 @@
     return novo;
   }
 
-  window.PptLib = { list, get, put, add, remove, update, search, extract, boxes, editTexts, replaceFile, exportZip, importZip, usage, persist };
+  window.PptLib = { list, get, put, add, remove, update, search, extract, boxes, backgrounds, toDataURL, editTexts, replaceFile, exportZip, importZip, usage, persist };
 })();
