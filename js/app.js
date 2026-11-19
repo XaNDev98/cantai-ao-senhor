@@ -307,6 +307,7 @@
         <a class="tile" href="#/converter">${ic('slides')}<span><strong>Converter para PPT</strong><small>Slides prontos</small></span></a>
         <a class="tile" href="#/repertorio">${ic('list')}<span><strong>Repertório</strong><small>Monte a missa</small></span>${n ? `<span class="count">${n}</span>` : ''}</a>
         <a class="tile" href="#/favoritos">${ic('star')}<span><strong>Favoritas</strong><small>${favs().length || 'Nenhuma'} ${favs().length === 1 ? 'música' : favs().length ? 'músicas' : 'ainda'}</small></span></a>
+        <a class="tile wide" href="#/ppts"><span class="cat-ico">${catIc('nota')}</span><span><strong>Meus PPTs</strong><small>Guarde os PPTs prontos e use quando quiser</small></span>${ic('chev', 'sm')}</a>
         <a class="tile wide" href="#/oracoes"><span class="cat-ico">${catIc('calice')}</span><span><strong>Orações Eucarísticas</strong><small>Guarde as 14 no app e leia sem internet</small></span>${ic('chev', 'sm')}</a>
       </section>
       ${h.length ? `<div class="sec-title">Vistas recentemente <a href="#/historico">Ver tudo</a></div>
@@ -333,6 +334,7 @@
       ${!termo ? `<div class="hint">Digite o nome ou um trecho de <b>qualquer música</b>: buscamos no acervo e na internet.</div>` : ''}
       ${res.length ? `<div class="sec-title">${termo ? 'No acervo' : 'Acervo'} <span>${res.length}</span></div>
         <ul class="list">${res.map(r => songRow(r.s, r.snip ? `<span class="snip">…${r.snip}…</span>` : '')).join('')}</ul>` : ''}
+      ${termo ? '<div id="pptres"></div>' : ''}
       ${termo && webOk ? `<div class="sec-title">Na internet <span class="src-tag">LRCLIB</span></div><div id="webres"><div class="hint loading"><span class="spin"></span> Buscando letras…</div></div>` : ''}
       ${termo && !webOk && !res.length ? emptyState('search', 'Nada encontrado', 'Tente outra palavra ou cadastre a música você mesmo.', `<a class="btn gold" href="#/nova">${ic('plus')} Adicionar música</a>`) : ''}`,
       after(el) {
@@ -340,6 +342,11 @@
         const clr = $('[data-act="clear-search"]', el);
         if (clr) clr.onclick = () => go(`#/buscar?f=${filtro}`, true);
         if (!termo) setTimeout(() => $('input', el).focus(), 50);
+        // resultados da biblioteca de PPTs do aparelho
+        const pbox = $('#pptres', el);
+        if (pbox && window.PptLib) PptLib.search(termo).then(items => {
+          if (items.length && pbox.isConnected) pbox.innerHTML = `<div class="sec-title">Nos seus PPTs <span>${items.length}</span></div><ul class="list">${items.slice(0, 10).map(pptRow).join('')}</ul>`;
+        }).catch(() => {});
         const box = $('#webres', el);
         if (!box) return;
         webSearch(termo).then(list => {
@@ -869,6 +876,7 @@ Regras:
       <div class="menu">
         <a href="#/buscar">${ic('search')}<span>Escolher uma música<small>Busque no acervo e toque em “Converter para PPT”</small></span>${ic('chev', 'sm')}</a>
         <a href="#/colar">${ic('paste')}<span>Colar uma letra<small>Copie de onde quiser e gere os slides na hora</small></span>${ic('chev', 'sm')}</a>
+        <a href="#/ppts">${ic('folder')}<span>Meus PPTs prontos<small>Guarde e reutilize apresentações que você já tem</small></span>${ic('chev', 'sm')}</a>
         <a href="${n ? '#/ppt?src=rep' : '#/repertorio'}">${ic('list')}<span>Repertório da missa<small>${n ? `${n} ${n === 1 ? 'música' : 'músicas'} em um único arquivo` : 'Monte o repertório primeiro'}</small></span>${ic('chev', 'sm')}</a>
       </div>
       <div class="sec-title">${hist().length ? 'Vistas recentemente' : 'Sugestões'}</div>
@@ -1428,6 +1436,179 @@ Regras:
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; });
   const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone;
 
+  /* ---------- Meus PPTs: biblioteca de apresentações prontas (no aparelho) ---------- */
+  const fmtSize = b => b >= 1073741824 ? (b / 1073741824).toFixed(1).replace('.', ',') + ' GB' : b >= 1048576 ? (b / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+  const fmtDate = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
+  const pptRow = it => `<li><a class="row" href="#/ppts/${encodeURIComponent(it.id)}">
+      <span class="ppt-ico">${ic('slides')}</span>
+      <span class="body"><b>${esc(it.nome)}</b><span class="sub">${it.slides.length ? it.slides.length + ' slides · ' : ''}${fmtSize(it.tamanho)} · ${fmtDate(it.data)}</span>
+      ${it.erro ? `<span class="snip">${esc(it.erro)}</span>` : ''}</span>${ic('chev', 'sm chev')}</a></li>`;
+
+  /**
+   * Transforma os slides em letra: cada slide vira uma estrofe.
+   * Tira o rodapé (linha repetida na maioria dos slides), rótulos como "REFRÃO"
+   * e o slide de título (cujo texto vira o título da música).
+   */
+  function pptToSong(it) {
+    let slides = it.slides.map(l => l.slice()).filter(l => l.length);
+    // 1) slide de título: primeiro slide curto cuja 1ª linha bate com o nome do arquivo
+    let titulo = it.nome;
+    const clean = s => norm(s).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const nome = clean(it.nome), first = slides[0];
+    if (first && slides.length > 1 && first.length <= 3) {
+      const l0 = clean(first[0]);
+      if (l0 && (nome.includes(l0) || l0.includes(nome))) { titulo = first[0]; slides = slides.slice(1); }
+    }
+    // 2) rodapé: mesma linha em 60%+ dos slides (geralmente o nome da música)
+    if (slides.length >= 3) {
+      const cont = new Map();
+      slides.forEach(l => new Set(l.map(norm)).forEach(x => cont.set(x, (cont.get(x) || 0) + 1)));
+      const rod = new Set([...cont].filter(([, n]) => n >= Math.max(3, slides.length * 0.6)).map(([x]) => x));
+      slides = slides.map(l => l.filter(x => !rod.has(norm(x))));
+    }
+    // 3) rótulos soltos
+    slides = slides.map(l => l.filter(x => !/^(refr[aã]o|estrofe \d*|coro)$/i.test(x.trim()))).filter(l => l.length);
+    return { titulo, texto: slides.map(l => l.join('\n')).join('\n\n') };
+  }
+
+  async function sendPpts(files, after) {
+    const list = [...files].filter(f => /\.(pptx|ppt|ppsx|pps)$/i.test(f.name) || /presentation|powerpoint/.test(f.type));
+    if (!list.length) return toast('Escolha arquivos de PowerPoint (.pptx)');
+    PptLib.persist();
+    let ok = 0;
+    for (const f of list) {
+      toast(`Guardando ${ok + 1} de ${list.length}: ${f.name}`);
+      try { await PptLib.add(f); ok++; } catch (e) { console.error(e); toast('Não consegui guardar ' + f.name + (e.name === 'QuotaExceededError' ? ' (sem espaço)' : '')); }
+    }
+    toast(`${ok} ${ok === 1 ? 'PPT guardado' : 'PPTs guardados'} na biblioteca`);
+    after && after();
+  }
+
+  views.ppts = ([id], q) => {
+    if (id) return pptDetail(id);
+    const termo = q.get('q') || '';
+    return {
+      tab: '',
+      html: `${topbar('Meus PPTs')}
+      <div class="oe-get">
+        <b>Sua biblioteca de apresentações</b>
+        <p class="ia-p">Guarde aqui os PPTs prontos da comunidade. O app lê o texto dos slides: eles aparecem na busca, podem ser apresentados e virar música do acervo.</p>
+        <label class="btn gold block ppt-up">${ic('upload')} Enviar PPTs<input type="file" multiple accept=".pptx,.ppt,.ppsx,.pps,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint" hidden data-act="pptfiles"></label>
+        <small data-uso>Os arquivos ficam guardados neste aparelho.</small>
+      </div>
+      <form class="searchbar" data-pptsearch>${ic('search')}<input type="search" name="q" value="${esc(termo)}" placeholder="Buscar nos PPTs (nome ou trecho)…" enterkeyhint="search" autocomplete="off"></form>
+      <div id="pptlist"><div class="hint loading"><span class="spin"></span> Carregando…</div></div>
+      <div class="sec-title">Backup</div>
+      <div class="menu">
+        <button data-act="pptexport">${ic('download')}<span>Exportar a biblioteca<small>Um arquivo .zip com todos os PPTs, para guardar ou passar a outro celular</small></span></button>
+        <label>${ic('upload')}<span>Importar backup<small>Arquivo .zip exportado pelo app</small></span><input type="file" accept=".zip,application/zip" hidden data-act="pptimport"></label>
+      </div>`,
+      async after(el) {
+        const box = $('#pptlist', el);
+        const fill = async () => {
+          const t = ($('[data-pptsearch] input', el) || {}).value || '';
+          const items = t.trim() ? await PptLib.search(t) : await PptLib.list();
+          if (!box.isConnected) return;
+          box.innerHTML = items.length
+            ? `<div class="sec-title">${t.trim() ? 'Encontrados' : 'Guardados'} <span>${items.length}</span></div><ul class="list">${items.map(pptRow).join('')}</ul>`
+            : (t.trim() ? `<div class="hint">Nenhum PPT com “${esc(t)}”.</div>` : emptyState('slides', 'Nenhum PPT guardado ainda', 'Toque em <b>Enviar PPTs</b> e escolha os arquivos do seu celular ou computador. Pode escolher vários de uma vez.'));
+          const u = await PptLib.usage(), uso = $('[data-uso]', el);
+          if (u && u.usage != null && uso) uso.textContent = `Os arquivos ficam guardados neste aparelho · ${fmtSize(u.usage)} usados de ${fmtSize(u.quota)} disponíveis.`;
+        };
+        $('[data-act="pptfiles"]', el).onchange = e => sendPpts(e.target.files, fill);
+        const sf = $('[data-pptsearch]', el);
+        sf.onsubmit = e => { e.preventDefault(); history.replaceState(null, '', '#/ppts?q=' + encodeURIComponent(sf.q.value.trim())); fill(); };
+        let deb; sf.q.oninput = () => { clearTimeout(deb); deb = setTimeout(fill, 250); };
+        $('[data-act="pptexport"]', el).onclick = async e => {
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          try {
+            const { blob, total } = await PptLib.exportZip();
+            if (!total) return toast('A biblioteca está vazia');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob); a.download = `biblioteca-ppts-cantai-${new Date().toISOString().slice(0, 10)}.zip`; a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+            toast(`Backup com ${total} ${total === 1 ? 'PPT' : 'PPTs'} gerado`);
+          } catch (err) { console.error(err); toast('Não consegui gerar o backup'); } finally { btn.disabled = false; }
+        };
+        $('[data-act="pptimport"]', el).onchange = async e => {
+          const f = e.target.files[0]; if (!f) return;
+          toast('Importando…');
+          try { const n = await PptLib.importZip(f); toast(n ? `${n} ${n === 1 ? 'PPT importado' : 'PPTs importados'}` : 'Nada novo para importar'); fill(); }
+          catch (err) { console.error(err); toast(err.message || 'Arquivo inválido'); }
+        };
+        fill();
+      }
+    };
+  };
+
+  function pptDetail(id) {
+    return {
+      tab: '',
+      html: `${topbar('PPT')}<div id="pptd"><div class="hint loading"><span class="spin"></span> Abrindo…</div></div>`,
+      async after(el) {
+        const box = $('#pptd', el);
+        const it = await PptLib.get(id);
+        if (!box.isConnected) return;
+        if (!it) { box.innerHTML = emptyState('slides', 'PPT não encontrado', 'Ele pode ter sido apagado deste aparelho.', `<a class="btn" href="#/ppts">Voltar à biblioteca</a>`); return; }
+        $('.topbar h1', el).textContent = it.nome;
+        const temTexto = it.slides.some(s => s.length);
+        box.innerHTML = `
+          <div class="ppt-head">
+            <span class="ppt-ico lg">${ic('slides')}</span>
+            <div><b>${esc(it.nome)}</b><small>${esc(it.arquivo)} · ${fmtSize(it.tamanho)} · ${it.slides.length} slides · ${fmtDate(it.data)}</small></div>
+          </div>
+          ${it.erro ? `<div class="ia-note">${ic('info', 'sm')}<span>${esc(it.erro)}</span></div>` : ''}
+          <div class="actions">
+            <div class="row3">
+              <button class="btn stack" data-act="open">${ic('download')}Abrir</button>
+              <button class="btn stack" data-act="show" ${temTexto ? '' : 'disabled'}>${ic('expand')}Apresentar</button>
+              <button class="btn stack" data-act="share">${ic('share')}Compartilhar</button>
+            </div>
+            ${temTexto ? `<button class="btn gold block" data-act="tosong">${ic('music')} Salvar como música do acervo</button>` : ''}
+            <div class="row3" style="grid-template-columns:1fr 1fr">
+              <button class="btn small" data-act="rename">${ic('edit', 'sm')} Renomear</button>
+              <button class="btn small danger" data-act="del">${ic('trash', 'sm')} Apagar</button>
+            </div>
+          </div>
+          ${temTexto ? `<div class="sec-title">Texto dos slides</div>
+          <div class="ppt-slides">${it.slides.map((lines, i) => `<div class="ppt-sl"><span class="num">${i + 1}</span>${lines.length ? lines.map(esc).join('<br>') : '<i>(sem texto)</i>'}</div>`).join('')}</div>` : ''}`;
+        const file = () => new File([it.blob], it.arquivo || (it.nome + '.pptx'), { type: it.tipo || 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+        $('[data-act="open"]', box).onclick = () => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(it.blob); a.download = it.arquivo || (it.nome + '.pptx'); a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        };
+        $('[data-act="share"]', box).onclick = async () => {
+          const f = file();
+          if (navigator.canShare && navigator.canShare({ files: [f] })) {
+            try { await navigator.share({ files: [f], title: it.nome }); } catch (e) { if (e.name !== 'AbortError') toast('Não foi possível compartilhar'); }
+          } else { $('[data-act="open"]', box).click(); toast('Compartilhamento indisponível aqui — arquivo baixado'); }
+        };
+        const show = $('[data-act="show"]', box);
+        if (show && temTexto) show.onclick = () => { const p = pptToSong(it); openShow([{ song: { id: it.id, titulo: p.titulo, texto: p.texto, autor: '' } }]); };
+        const tosong = $('[data-act="tosong"]', box);
+        if (tosong) tosong.onclick = () => {
+          const p = pptToSong(it);
+          const s = saveUserSong({ titulo: p.titulo, categoria: 'outros', autor: '', texto: p.texto, fonte: 'Importada de PPT (' + it.arquivo + ')' });
+          PptLib.update(it.id, { musica: s.id });
+          toast('Música criada! Escolha o momento da missa em Editar.');
+          go('#/musica/' + encodeURIComponent(s.id));
+        };
+        $('[data-act="rename"]', box).onclick = async () => {
+          const nome = prompt('Novo nome:', it.nome);
+          if (!nome || !nome.trim()) return;
+          await PptLib.update(it.id, { nome: nome.trim(), texto: norm(nome.trim() + '\n' + it.slides.flat().join('\n')) });
+          toast('Renomeado'); render();
+        };
+        $('[data-act="del"]', box).onclick = async () => {
+          if (!confirm(`Apagar “${it.nome}” deste aparelho?`)) return;
+          await PptLib.remove(it.id); toast('PPT apagado'); go('#/ppts', true);
+        };
+      }
+    };
+  }
+
   views.ia = () => {
     const key = iaKey();
     const models = store.get(MODELS_KEY, []);
@@ -1490,6 +1671,7 @@ Regras:
         <a href="#/nova">${ic('plus')}<span>Adicionar música<small>Cadastre os cantos da sua comunidade</small></span>${ic('chev', 'sm')}</a>
         <a href="#/minhas">${ic('folder')}<span>Minhas músicas<small>${n} ${n === 1 ? 'cadastrada' : 'cadastradas'} neste aparelho</small></span>${ic('chev', 'sm')}</a>
         <a href="#/colar">${ic('paste')}<span>Colar letra e gerar PPT</span>${ic('chev', 'sm')}</a>
+        <a href="#/ppts">${ic('slides')}<span>Meus PPTs<small>Biblioteca de apresentações prontas</small></span>${ic('chev', 'sm')}</a>
         <a href="#/ia">${ic('music')}<span>Cifras com IA (Gemini)<small>${iaKey() ? 'Ativada neste aparelho' : 'Grátis: a cifra aparece sozinha'}</small></span>${ic('chev', 'sm')}</a>
         <a href="#/oracoes">${ic('cross')}<span>Orações Eucarísticas</span>${ic('chev', 'sm')}</a>
         <a href="#/historico">${ic('clock')}<span>Histórico</span>${ic('chev', 'sm')}</a>
