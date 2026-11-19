@@ -1441,7 +1441,7 @@ Regras:
   const fmtDate = t => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
   const pptRow = it => `<li><a class="row" href="#/ppts/${encodeURIComponent(it.id)}">
       <span class="ppt-ico">${ic('slides')}</span>
-      <span class="body"><b>${esc(it.nome)}</b><span class="sub">${it.slides.length ? it.slides.length + ' slides · ' : ''}${fmtSize(it.tamanho)} · ${fmtDate(it.data)}</span>
+      <span class="body"><b>${esc(it.nome)}${it.nuvem ? '<span class="badge">NUVEM</span>' : ''}</b><span class="sub">${it.slides.length ? it.slides.length + ' slides · ' : ''}${fmtSize(it.tamanho)} · ${fmtDate(it.data)}${it.nuvem && !it.temArquivo ? ' · baixa ao abrir' : ''}</span>
       ${it.erro ? `<span class="snip">${esc(it.erro)}</span>` : ''}</span>${ic('chev', 'sm chev')}</a></li>`;
 
   /**
@@ -1471,20 +1471,82 @@ Regras:
     return { titulo, texto: slides.map(l => l.join('\n')).join('\n\n') };
   }
 
+  /* ---------- biblioteca online (Supabase) ---------- */
+  let nuvemState = { checked: false, user: null, membro: false };
+  async function nuvemCheck(force) {
+    if (nuvemState.checked && !force) return nuvemState;
+    if (!window.Nuvem || !Nuvem.configured()) return (nuvemState = { checked: true, off: true, user: null, membro: false });
+    const user = await Nuvem.user();
+    let membro = false, erro = '';
+    if (user) { try { membro = await Nuvem.isMember(); } catch (e) { erro = e.message; } }
+    return (nuvemState = { checked: true, user, membro, erro });
+  }
+  const online = () => !!(nuvemState.user && nuvemState.membro);
+
+  /** Sobe para a nuvem o arquivo atual de um PPT do aparelho. */
+  async function pushNuvem(id) {
+    if (!online()) return false;
+    const full = await PptLib.get(id);
+    if (!full || !full.blob) return false;
+    const caminho = await Nuvem.upload(full);
+    await PptLib.update(id, { nuvem: true, caminho });
+    return true;
+  }
+
+  /** Junta aparelho e nuvem: envia o que é novo daqui, traz o que é novo de lá (sem baixar os arquivos). */
+  async function syncNuvem() {
+    const rows = await Nuvem.list();
+    const cloud = new Map(rows.map(r => [r.id, r]));
+    const local = await PptLib.list();
+    const lmap = new Map(local.map(i => [i.id, i]));
+    let enviados = 0, recebidos = 0, removidos = 0;
+    for (const it of local) {
+      if (!it.nuvem) { if (await pushNuvem(it.id)) enviados++; }
+      else if (!cloud.has(it.id)) { await PptLib.remove(it.id); removidos++; }          // apagado por outro membro
+    }
+    for (const r of rows) {
+      const l = lmap.get(r.id);
+      const meta = { nome: r.nome, arquivo: r.arquivo, tipo: r.tipo, tamanho: r.tamanho, data: r.data, slides: r.slides || [], texto: r.texto || '', erro: r.erro || '', caminho: r.caminho, versao: r.versao || 0, enviadoPor: r.enviado_por, nuvem: true };
+      if (!l) { await PptLib.put({ id: r.id, ...meta, blob: null }); recebidos++; }
+      else if ((r.versao || 0) > (l.versao || 0)) { await PptLib.update(r.id, { ...meta, blob: null }); recebidos++; }  // editado em outro aparelho
+      else if (l.nome !== r.nome) await PptLib.update(r.id, { nome: r.nome, texto: r.texto || l.texto });
+    }
+    store.set('nuvemSync', Date.now());
+    return { enviados, recebidos, removidos };
+  }
+
+  /** Arquivo do PPT: do aparelho, ou baixa da nuvem na primeira vez. */
+  async function ensureBlob(it) {
+    if (it.blob) return it.blob;
+    if (!it.nuvem || !it.caminho) throw new Error('O arquivo deste PPT não está neste aparelho.');
+    await nuvemCheck();
+    if (!online()) throw new Error('Entre na biblioteca online para baixar este PPT.');
+    toast('Baixando da nuvem…');
+    const b = await Nuvem.download(it.caminho);
+    await PptLib.update(it.id, { blob: b });
+    it.blob = b;
+    return b;
+  }
+
   async function sendPpts(files, after) {
     const list = [...files].filter(f => /\.(pptx|ppt|ppsx|pps)$/i.test(f.name) || /presentation|powerpoint/.test(f.type));
     if (!list.length) return toast('Escolha arquivos de PowerPoint (.pptx)');
     PptLib.persist();
-    let ok = 0;
+    await nuvemCheck();
+    let ok = 0, subiu = 0;
     for (const f of list) {
       toast(`Guardando ${ok + 1} de ${list.length}: ${f.name}`);
-      try { await PptLib.add(f); ok++; } catch (e) { console.error(e); toast('Não consegui guardar ' + f.name + (e.name === 'QuotaExceededError' ? ' (sem espaço)' : '')); }
+      try {
+        const meta = await PptLib.add(f); ok++;
+        if (online()) { try { if (await pushNuvem(meta.id)) subiu++; } catch (e) { console.error(e); toast('Guardado só no aparelho: ' + e.message); } }
+      } catch (e) { console.error(e); toast('Não consegui guardar ' + f.name + (e.name === 'QuotaExceededError' ? ' (sem espaço)' : '')); }
     }
-    toast(`${ok} ${ok === 1 ? 'PPT guardado' : 'PPTs guardados'} na biblioteca`);
+    toast(`${ok} ${ok === 1 ? 'PPT guardado' : 'PPTs guardados'}${subiu ? ` e ${subiu === ok ? '' : subiu + ' '}enviado${subiu === 1 ? '' : 's'} para a nuvem` : ''}`);
     after && after();
   }
 
   views.ppts = ([id], q) => {
+    if (id && q.get('editar') === '1') return pptEditor(id);
     if (id) return pptDetail(id);
     const termo = q.get('q') || '';
     return {
@@ -1492,10 +1554,11 @@ Regras:
       html: `${topbar('Meus PPTs')}
       <div class="oe-get">
         <b>Sua biblioteca de apresentações</b>
-        <p class="ia-p">Guarde aqui os PPTs prontos da comunidade. O app lê o texto dos slides: eles aparecem na busca, podem ser apresentados e virar música do acervo.</p>
+        <p class="ia-p">Guarde aqui os PPTs prontos da comunidade. O app lê o texto dos slides: eles aparecem na busca, podem ser apresentados, editados e virar música do acervo.</p>
         <label class="btn gold block ppt-up">${ic('upload')} Enviar PPTs<input type="file" multiple accept=".pptx,.ppt,.ppsx,.pps,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint" hidden data-act="pptfiles"></label>
         <small data-uso>Os arquivos ficam guardados neste aparelho.</small>
       </div>
+      <div class="nuvem-box" data-nuvem></div>
       <form class="searchbar" data-pptsearch>${ic('search')}<input type="search" name="q" value="${esc(termo)}" placeholder="Buscar nos PPTs (nome ou trecho)…" enterkeyhint="search" autocomplete="off"></form>
       <div id="pptlist"><div class="hint loading"><span class="spin"></span> Carregando…</div></div>
       <div class="sec-title">Backup</div>
@@ -1538,6 +1601,29 @@ Regras:
           catch (err) { console.error(err); toast(err.message || 'Arquivo inválido'); }
         };
         fill();
+        // biblioteca online: mostra o estado e sincroniza ao abrir
+        const nb = $('[data-nuvem]', el);
+        const nuvemUI = (msg, acao) => { if (nb.isConnected) nb.innerHTML = `${ic('upload', 'sm')}<span>${msg}</span>${acao || ''}`; };
+        const st = await nuvemCheck(true);
+        if (st.off) nuvemUI('Biblioteca online ainda não configurada.', `<a href="#/nuvem">Configurar</a>`);
+        else if (!st.user) nuvemUI('Entre para ver os PPTs da biblioteca online.', `<a href="#/nuvem">Entrar</a>`);
+        else if (!st.membro) nuvemUI(`${esc(st.user.email)} não está na lista de membros.`, `<a href="#/nuvem">Ver</a>`);
+        else {
+          const doSync = async () => {
+            nuvemUI(`Online como <b>${esc(st.user.email)}</b> · sincronizando…`);
+            try {
+              const r = await syncNuvem();
+              const partes = [r.recebidos && `${r.recebidos} recebido${r.recebidos > 1 ? 's' : ''}`, r.enviados && `${r.enviados} enviado${r.enviados > 1 ? 's' : ''}`, r.removidos && `${r.removidos} removido${r.removidos > 1 ? 's' : ''}`].filter(Boolean);
+              nuvemUI(`Online como <b>${esc(st.user.email)}</b> · ${partes.length ? partes.join(', ') : 'tudo em dia'}`, `<button data-act="sync">Sincronizar</button>`);
+              if (partes.length) fill();
+            } catch (e) {
+              console.error(e);
+              nuvemUI(`Online · ${esc(e.message)}`, `<button data-act="sync">Tentar de novo</button>`);
+            }
+            const b = $('[data-act="sync"]', nb); if (b) b.onclick = doSync;
+          };
+          doSync();
+        }
       }
     };
   };
@@ -1565,25 +1651,45 @@ Regras:
               <button class="btn stack" data-act="show" ${temTexto ? '' : 'disabled'}>${ic('expand')}Apresentar</button>
               <button class="btn stack" data-act="share">${ic('share')}Compartilhar</button>
             </div>
-            ${temTexto ? `<button class="btn gold block" data-act="tosong">${ic('music')} Salvar como música do acervo</button>` : ''}
+            <div class="row3" style="grid-template-columns:1fr 1fr">
+              ${temTexto ? `<a class="btn gold" href="#/ppts/${encodeURIComponent(it.id)}?editar=1">${ic('edit')} Editar textos</a>` : '<span></span>'}
+              <label class="btn ppt-up">${ic('upload')} Substituir arquivo<input type="file" accept=".pptx,.ppt,.ppsx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint" hidden data-act="replace"></label>
+            </div>
+            ${temTexto ? `<button class="btn block" data-act="tosong">${ic('music')} Salvar como música do acervo</button>` : ''}
             <div class="row3" style="grid-template-columns:1fr 1fr">
               <button class="btn small" data-act="rename">${ic('edit', 'sm')} Renomear</button>
               <button class="btn small danger" data-act="del">${ic('trash', 'sm')} Apagar</button>
             </div>
+            <p class="ppt-dica">Para mudar imagens ou o layout: toque em <b>Abrir</b>, edite no PowerPoint ou Google Apresentações, salve e use <b>Substituir arquivo</b>.${it.nuvem ? ' A versão nova vai para todos da biblioteca online.' : ''}</p>
           </div>
           ${temTexto ? `<div class="sec-title">Texto dos slides</div>
           <div class="ppt-slides">${it.slides.map((lines, i) => `<div class="ppt-sl"><span class="num">${i + 1}</span>${lines.length ? lines.map(esc).join('<br>') : '<i>(sem texto)</i>'}</div>`).join('')}</div>` : ''}`;
-        const file = () => new File([it.blob], it.arquivo || (it.nome + '.pptx'), { type: it.tipo || 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
-        $('[data-act="open"]', box).onclick = () => {
+        const tipo = it.tipo || 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+        const baixar = blob => {
           const a = document.createElement('a');
-          a.href = URL.createObjectURL(it.blob); a.download = it.arquivo || (it.nome + '.pptx'); a.click();
+          a.href = URL.createObjectURL(blob); a.download = it.arquivo || (it.nome + '.pptx'); a.click();
           setTimeout(() => URL.revokeObjectURL(a.href), 4000);
         };
+        $('[data-act="open"]', box).onclick = async () => {
+          try { baixar(await ensureBlob(it)); } catch (e) { toast(e.message); }
+        };
         $('[data-act="share"]', box).onclick = async () => {
-          const f = file();
+          let blob;
+          try { blob = await ensureBlob(it); } catch (e) { return toast(e.message); }
+          const f = new File([blob], it.arquivo || (it.nome + '.pptx'), { type: tipo });
           if (navigator.canShare && navigator.canShare({ files: [f] })) {
             try { await navigator.share({ files: [f], title: it.nome }); } catch (e) { if (e.name !== 'AbortError') toast('Não foi possível compartilhar'); }
-          } else { $('[data-act="open"]', box).click(); toast('Compartilhamento indisponível aqui — arquivo baixado'); }
+          } else { baixar(blob); toast('Compartilhamento indisponível aqui — arquivo baixado'); }
+        };
+        $('[data-act="replace"]', box).onchange = async e => {
+          const f = e.target.files[0]; if (!f) return;
+          toast('Substituindo…');
+          try {
+            await PptLib.replaceFile(it.id, f, f.name);
+            await nuvemCheck();
+            if (it.nuvem || online()) { try { await pushNuvem(it.id); } catch (err) { toast('Substituído só neste aparelho: ' + err.message); render(); return; } }
+            toast(online() ? 'Arquivo substituído para todos' : 'Arquivo substituído'); render();
+          } catch (err) { console.error(err); toast(err.message || 'Não consegui substituir'); }
         };
         const show = $('[data-act="show"]', box);
         if (show && temTexto) show.onclick = () => { const p = pptToSong(it); openShow([{ song: { id: it.id, titulo: p.titulo, texto: p.texto, autor: '' } }]); };
@@ -1598,16 +1704,142 @@ Regras:
         $('[data-act="rename"]', box).onclick = async () => {
           const nome = prompt('Novo nome:', it.nome);
           if (!nome || !nome.trim()) return;
-          await PptLib.update(it.id, { nome: nome.trim(), texto: norm(nome.trim() + '\n' + it.slides.flat().join('\n')) });
+          const texto = norm(nome.trim() + '\n' + it.slides.flat().join('\n'));
+          await PptLib.update(it.id, { nome: nome.trim(), texto });
+          await nuvemCheck();
+          if (it.nuvem && online()) { try { await Nuvem.rename(it.id, nome.trim(), texto); } catch (e) { toast('Renomeado só neste aparelho: ' + e.message); } }
           toast('Renomeado'); render();
         };
         $('[data-act="del"]', box).onclick = async () => {
-          if (!confirm(`Apagar “${it.nome}” deste aparelho?`)) return;
+          await nuvemCheck();
+          if (it.nuvem && online()) {
+            if (!confirm(`Apagar “${it.nome}” da biblioteca online?\n\nEle some para TODOS os membros.`)) return;
+            try { await Nuvem.remove({ id: it.id, caminho: it.caminho }); } catch (e) { return toast('Não consegui apagar da nuvem: ' + e.message); }
+          } else if (it.nuvem) {
+            if (!confirm(`Apagar “${it.nome}” deste aparelho?\n\nEle continua na biblioteca online e volta na próxima sincronização.`)) return;
+          } else if (!confirm(`Apagar “${it.nome}” deste aparelho?`)) return;
           await PptLib.remove(it.id); toast('PPT apagado'); go('#/ppts', true);
         };
       }
     };
   }
+
+  /** Editor: um campo por slide; grava no próprio .pptx mantendo fundo e formatação. */
+  function pptEditor(id) {
+    return {
+      tab: '',
+      html: `${topbar('Editar textos')}<div id="pped"><div class="hint loading"><span class="spin"></span> Abrindo…</div></div>`,
+      async after(el) {
+        const box = $('#pped', el);
+        const it = await PptLib.get(id);
+        if (!box.isConnected) return;
+        if (!it) { box.innerHTML = emptyState('slides', 'PPT não encontrado', '', `<a class="btn" href="#/ppts">Voltar</a>`); return; }
+        $('.topbar h1', el).textContent = 'Editar: ' + it.nome;
+        let estrutura;
+        try { estrutura = await PptLib.boxes(await ensureBlob(it)); }
+        catch (e) { box.innerHTML = emptyState('slides', 'Não foi possível abrir para edição', esc(e.message), `<a class="btn" href="#/ppts/${encodeURIComponent(it.id)}">Voltar</a>`); return; }
+        // a caixa com mais linhas de cada slide é o texto principal; as outras (rodapé, rótulo) vêm separadas
+        box.innerHTML = `
+          <div class="ia-note">${ic('info', 'sm')}<span>Cada linha do campo é uma linha do slide. O fundo, as imagens e a formatação do PPT continuam iguais.</span></div>
+          <form class="form ppt-edit" id="f">
+            ${estrutura.map((caixas, i) => `<div class="ppt-ed-sl"><div class="ppt-ed-h">Slide ${i + 1}</div>
+              ${caixas.length ? caixas.map((lines, c) => {
+                const maior = caixas.findIndex(x => x.length === Math.max(...caixas.map(y => y.length)));
+                const principal = c === maior;
+                return `<div class="field"><label for="s${i}-${c}">${caixas.length > 1 ? (principal ? 'Texto principal' : 'Outro texto (título, rótulo ou rodapé)') : 'Texto'}</label>
+                  <textarea id="s${i}-${c}" data-s="${i}" data-c="${c}" rows="${Math.max(1, Math.min(10, lines.length + (principal ? 1 : 0)))}">${esc(lines.join('\n'))}</textarea></div>`;
+              }).join('') : '<p class="ppt-dica">Este slide não tem texto.</p>'}</div>`).join('')}
+            <button class="btn gold block">${ic('check')} Salvar alterações</button>
+            <a class="btn block" href="#/ppts/${encodeURIComponent(it.id)}">Cancelar</a>
+          </form>`;
+        const f = $('#f', box);
+        f.onsubmit = async e => {
+          e.preventDefault();
+          const btn = $('button.gold', f), old = btn.innerHTML;
+          btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Salvando…';
+          try {
+            const novos = estrutura.map((caixas, i) => caixas.map((_, c) => $(`[data-s="${i}"][data-c="${c}"]`, f).value.split('\n')));
+            const blob = await PptLib.editTexts(await ensureBlob(it), novos);
+            await PptLib.replaceFile(it.id, blob, it.arquivo);
+            await nuvemCheck();
+            let msg = 'PPT salvo';
+            if (it.nuvem || online()) {
+              try { if (await pushNuvem(it.id)) msg = 'PPT salvo e atualizado para todos'; }
+              catch (err) { msg = 'Salvo só neste aparelho: ' + err.message; }
+            }
+            toast(msg);
+            go('#/ppts/' + encodeURIComponent(it.id), true);
+          } catch (err) {
+            console.error(err); toast(err.message || 'Não consegui salvar');
+            btn.disabled = false; btn.innerHTML = old;
+          }
+        };
+      }
+    };
+  }
+
+  /* ---------- tela da biblioteca online (login) ---------- */
+  views.nuvem = () => ({
+    tab: 'mais',
+    html: `${topbar('Biblioteca online')}<div id="nv"><div class="hint loading"><span class="spin"></span> Verificando…</div></div>`,
+    async after(el) {
+      const box = $('#nv', el);
+      const st = await nuvemCheck(true);
+      if (!box.isConnected) return;
+      if (st.off) {
+        box.innerHTML = `<div class="oe-get"><b>Biblioteca online ainda não configurada</b>
+          <p class="ia-p">Quem administra o app precisa criar o projeto gratuito no Supabase e ligar aqui. Depois disso, cada pessoa só entra com e-mail e senha.</p></div>
+          <form class="form" id="cfg" style="margin-top:12px">
+            <div class="field"><label for="u">Project URL</label><input id="u" name="url" placeholder="https://xxxx.supabase.co" autocomplete="off"></div>
+            <div class="field"><label for="a">Chave pública (anon / publishable)</label><input id="a" name="anon" autocomplete="off" spellcheck="false"></div>
+            <button class="btn gold block">${ic('check')} Ligar a biblioteca</button>
+          </form>`;
+        $('#cfg', box).onsubmit = e => {
+          e.preventDefault();
+          const u = e.target.url.value.trim(), a = e.target.anon.value.trim();
+          if (!/^https:\/\/[\w.-]+\.supabase\.(co|in)\/?$/.test(u) || a.length < 20) return toast('Confira o endereço e a chave');
+          Nuvem.setConfig(u, a); toast('Biblioteca ligada'); render();
+        };
+        return;
+      }
+      if (st.user) {
+        box.innerHTML = `<div class="oe-get"><b>${st.membro ? 'Você está na biblioteca online' : 'Conta sem acesso à biblioteca'}</b>
+          <p class="ia-p">Conectado como <em>${esc(st.user.email)}</em>.</p>
+          <p class="ia-p">${st.membro ? 'Os PPTs que você enviar aparecem para todos os membros, e os deles aparecem para você em <em>Meus PPTs</em>.' : `Peça para quem administra incluir este e-mail na lista de membros. ${st.erro ? '(' + esc(st.erro) + ')' : ''}`}</p>
+          ${st.membro ? `<a class="btn gold block" href="#/ppts">${ic('slides')} Abrir Meus PPTs</a>` : ''}
+          <button class="btn block" data-act="sair">Sair</button></div>`;
+        $('[data-act="sair"]', box).onclick = async () => { await Nuvem.signOut(); nuvemState.checked = false; toast('Você saiu'); render(); };
+        return;
+      }
+      box.innerHTML = `<div class="oe-get"><b>Entrar na biblioteca online</b>
+          <p class="ia-p">Com a conta, os PPTs ficam guardados na nuvem e aparecem nos celulares de todos os membros (ex.: você e seu irmão). Só e-mails autorizados entram.</p></div>
+        <form class="form" id="lg" style="margin-top:12px">
+          <div class="field"><label for="e">E-mail</label><input id="e" name="email" type="email" autocomplete="email" required></div>
+          <div class="field"><label for="p">Senha</label><input id="p" name="senha" type="password" autocomplete="current-password" minlength="6" required></div>
+          <button class="btn gold block" data-modo="entrar">${ic('check')} Entrar</button>
+          <button type="button" class="btn block" data-modo="criar">Criar conta</button>
+          <p class="help" style="color:var(--muted);font-size:12.5px">Na primeira vez, toque em <b>Criar conta</b>, abra o link de confirmação que chega no e-mail e depois volte aqui e toque em <b>Entrar</b>.</p>
+        </form>`;
+      const f = $('#lg', box);
+      const go2 = async modo => {
+        if (!f.reportValidity()) return;
+        const b = $(`[data-modo="${modo}"]`, f), old = b.innerHTML;
+        b.disabled = true; b.innerHTML = '<span class="spin"></span>';
+        try {
+          if (modo === 'criar') {
+            const r = await Nuvem.signUp(f.email.value, f.senha.value);
+            toast(r.session ? 'Conta criada!' : 'Conta criada! Confirme pelo link que chegou no seu e-mail e depois toque em Entrar.');
+          } else {
+            await Nuvem.signIn(f.email.value, f.senha.value);
+            toast('Bem-vindo!');
+          }
+          nuvemState.checked = false; render();
+        } catch (err) { toast(err.message); b.disabled = false; b.innerHTML = old; }
+      };
+      f.onsubmit = e => { e.preventDefault(); go2('entrar'); };
+      $('[data-modo="criar"]', f).onclick = () => go2('criar');
+    }
+  });
 
   views.ia = () => {
     const key = iaKey();
@@ -1672,6 +1904,7 @@ Regras:
         <a href="#/minhas">${ic('folder')}<span>Minhas músicas<small>${n} ${n === 1 ? 'cadastrada' : 'cadastradas'} neste aparelho</small></span>${ic('chev', 'sm')}</a>
         <a href="#/colar">${ic('paste')}<span>Colar letra e gerar PPT</span>${ic('chev', 'sm')}</a>
         <a href="#/ppts">${ic('slides')}<span>Meus PPTs<small>Biblioteca de apresentações prontas</small></span>${ic('chev', 'sm')}</a>
+        <a href="#/nuvem">${ic('upload')}<span>Biblioteca online<small>Entrar para dividir os PPTs entre os membros</small></span>${ic('chev', 'sm')}</a>
         <a href="#/ia">${ic('music')}<span>Cifras com IA (Gemini)<small>${iaKey() ? 'Ativada neste aparelho' : 'Grátis: a cifra aparece sozinha'}</small></span>${ic('chev', 'sm')}</a>
         <a href="#/oracoes">${ic('cross')}<span>Orações Eucarísticas</span>${ic('chev', 'sm')}</a>
         <a href="#/historico">${ic('clock')}<span>Histórico</span>${ic('chev', 'sm')}</a>

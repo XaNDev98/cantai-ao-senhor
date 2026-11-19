@@ -42,7 +42,7 @@
   /** Lista sem carregar os arquivos (só os dados), mais recentes primeiro. */
   async function list() {
     const all = await tx('readonly', st => req(st.getAll()));
-    return all.map(({ blob, ...meta }) => meta).sort((a, b) => b.data - a.data);
+    return all.map(({ blob, ...meta }) => ({ ...meta, temArquivo: !!blob })).sort((a, b) => b.data - a.data);
   }
   const get = id => tx('readonly', st => req(st.get(id)));
   const remove = id => tx('readwrite', st => req(st.delete(id)));
@@ -54,6 +54,114 @@
   async function extract(blob) {
     await window.Cantai.loadLib();               // traz o JSZip junto com o gerador de PPT
     const zip = await window.JSZip.loadAsync(blob);
+    const slides = [];
+    for (const path of await slideOrder(zip)) {
+      const f = zip.file(path);
+      if (!f) continue;
+      const xml = new DOMParser().parseFromString(await f.async('string'), 'application/xml');
+      slides.push(textParas(xml).flatMap(p => p.lines));
+    }
+    return slides;
+  }
+
+  /** Parágrafos com texto de um slide: [{ node, lines }] (quebra <a:br> = nova linha). */
+  function textParas(xml) {
+    const out = [];
+    for (const p of xml.getElementsByTagNameNS(NS_A, 'p')) {
+      let t = '', hasText = false;
+      for (const node of p.childNodes) {
+        if (node.localName === 'r' || node.localName === 'fld') { t += [...node.getElementsByTagNameNS(NS_A, 't')].map(x => x.textContent).join(''); hasText = true; }
+        else if (node.localName === 'br') t += '\n';
+      }
+      const lines = t.split('\n').map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+      if (hasText && lines.length) out.push({ node: p, lines });
+    }
+    return out;
+  }
+
+  /** Reescreve o texto de um parágrafo mantendo a formatação do 1º trecho. */
+  function setParaText(p, lines) {
+    const A = NS_A, doc = p.ownerDocument;
+    const firstRun = [...p.childNodes].find(n => n.localName === 'r');
+    const rPr = firstRun && [...firstRun.childNodes].find(n => n.localName === 'rPr');
+    for (const n of [...p.childNodes]) if (['r', 'br', 'fld'].includes(n.localName)) p.removeChild(n);
+    const endPr = [...p.childNodes].find(n => n.localName === 'endParaRPr');
+    lines.forEach((line, i) => {
+      if (i > 0) {
+        const br = doc.createElementNS(A, 'a:br');
+        if (rPr) br.appendChild(rPr.cloneNode(true));
+        p.insertBefore(br, endPr || null);
+      }
+      const r = doc.createElementNS(A, 'a:r');
+      if (rPr) r.appendChild(rPr.cloneNode(true));
+      const t = doc.createElementNS(A, 'a:t');
+      t.textContent = line;
+      if (/^\s|\s$/.test(line)) t.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve');
+      r.appendChild(t);
+      p.insertBefore(r, endPr || null);
+    });
+  }
+
+  /** Caixas de texto de um slide: [[parágrafos da caixa 1], [parágrafos da caixa 2], ...] */
+  function textBoxes(xml) {
+    const groups = new Map();
+    for (const p of textParas(xml)) {
+      const box = p.node.parentNode;
+      if (!groups.has(box)) groups.set(box, []);
+      groups.get(box).push(p);
+    }
+    return [...groups.values()];
+  }
+
+  /** Estrutura para o editor: por slide, as linhas de cada caixa de texto. */
+  async function boxes(blob) {
+    await window.Cantai.loadLib();
+    const zip = await window.JSZip.loadAsync(blob);
+    const out = [];
+    for (const path of await slideOrder(zip)) {
+      const xml = new DOMParser().parseFromString(await zip.file(path).async('string'), 'application/xml');
+      out.push(textBoxes(xml).map(b => b.flatMap(p => p.lines)));
+    }
+    return out;
+  }
+
+  /**
+   * Edita os textos de um .pptx. novos[slide][caixa] = [linhas] (mesma ordem de boxes()).
+   * Fundo, imagens e formatação continuam os do arquivo. Retorna um novo Blob.
+   */
+  async function editTexts(blob, novos) {
+    await window.Cantai.loadLib();
+    const zip = await window.JSZip.loadAsync(blob);
+    const order = await slideOrder(zip);
+    for (let i = 0; i < order.length; i++) {
+      if (!novos[i]) continue;
+      const f = zip.file(order[i]);
+      if (!f) continue;
+      const xml = new DOMParser().parseFromString(await f.async('string'), 'application/xml');
+      const caixas = textBoxes(xml);
+      let mudou = false;
+      caixas.forEach((paras, c) => {
+        if (!novos[i][c]) return;
+        const want = novos[i][c].map(s => s.replace(/\s+$/, '')).filter(Boolean);
+        if (JSON.stringify(paras.flatMap(p => p.lines)) === JSON.stringify(want)) return;   // caixa sem mudança
+        mudou = true;
+        // mesma quantidade de linhas por parágrafo de antes; o que sobrar entra no último
+        let k = 0;
+        paras.forEach((p, idx) => {
+          const take = idx === paras.length - 1 ? want.slice(k) : want.slice(k, k + p.lines.length);
+          k += take.length;
+          if (take.length) setParaText(p.node, take);
+          else if (paras.length > 1) p.node.parentNode.removeChild(p.node);
+          else setParaText(p.node, ['']);
+        });
+      });
+      if (mudou) zip.file(order[i], new XMLSerializer().serializeToString(xml));
+    }
+    return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', compression: 'DEFLATE' });
+  }
+
+  /** Caminhos dos slides na ordem em que aparecem na apresentação. */
+  async function slideOrder(zip) {
     // ordem real dos slides: presentation.xml (sldIdLst) + relações
     let order = [];
     try {
@@ -70,23 +178,7 @@
       order = Object.keys(zip.files).filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
         .sort((a, b) => (+a.match(/(\d+)\.xml$/)[1]) - (+b.match(/(\d+)\.xml$/)[1]));
     }
-    const slides = [];
-    for (const path of order) {
-      const f = zip.file(path);
-      if (!f) continue;
-      const xml = new DOMParser().parseFromString(await f.async('string'), 'application/xml');
-      const lines = [];
-      for (const p of xml.getElementsByTagNameNS(NS_A, 'p')) {
-        let t = '';
-        for (const node of p.childNodes) {
-          if (node.localName === 'r' || node.localName === 'fld') t += [...node.getElementsByTagNameNS(NS_A, 't')].map(x => x.textContent).join('');
-          else if (node.localName === 'br') t += '\n';
-        }
-        t.split('\n').map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean).forEach(s => lines.push(s));
-      }
-      slides.push(lines);
-    }
-    return slides;
+    return order.filter(p => zip.file(p));
   }
 
   const normName = n => String(n || '').replace(/\.(pptx|ppt|odp|pps|ppsx)$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -108,6 +200,7 @@
       tipo: file.type || (isPptx ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/vnd.ms-powerpoint'),
       tamanho: file.size,
       data: Date.now(),
+      versao: Date.now(),
       slides,
       texto: norm(normName(file.name) + '\n' + slides.flat().join('\n')),
       erro,
@@ -132,13 +225,14 @@
     const items = await tx('readonly', st => req(st.getAll()));
     const index = [];
     for (const it of items) {
+      if (!it.blob) continue;                       // da nuvem e ainda não baixado neste aparelho
       const nomeArq = it.id + '__' + (it.arquivo || 'apresentacao.pptx').replace(/[\\/:*?"<>|]/g, '_');
       zip.file('arquivos/' + nomeArq, it.blob);
       const { blob, ...meta } = it;
       index.push({ ...meta, zipPath: 'arquivos/' + nomeArq });
     }
     zip.file('biblioteca.json', JSON.stringify({ app: 'cantai-ao-senhor', tipo: 'biblioteca-ppt', versao: 1, itens: index }, null, 1));
-    return { blob: await zip.generateAsync({ type: 'blob' }), total: items.length };
+    return { blob: await zip.generateAsync({ type: 'blob' }), total: index.length };
   }
   async function importZip(file) {
     await window.Cantai.loadLib();
@@ -169,5 +263,25 @@
     return false;
   }
 
-  window.PptLib = { list, get, add, remove, update, search, extract, exportZip, importZip, usage, persist };
+  /** Troca o arquivo de um PPT (versão editada aqui ou no PowerPoint) e relê os slides. */
+  async function replaceFile(id, blob, nomeArquivo) {
+    const it = await get(id);
+    if (!it) throw new Error('PPT não encontrado');
+    const isPptx = /\.(pptx|ppsx)$/i.test(nomeArquivo || it.arquivo || '') || /presentationml/.test(blob.type);
+    let slides = [], erro = '';
+    if (isPptx) { try { slides = await extract(blob); } catch { erro = 'Não foi possível ler o texto deste arquivo.'; } }
+    else erro = 'Formato antigo (.ppt): o texto não é lido. Salve como .pptx.';
+    const novo = {
+      ...it, blob, slides, erro,
+      arquivo: nomeArquivo || it.arquivo,
+      tipo: blob.type || it.tipo,
+      tamanho: blob.size,
+      texto: norm(it.nome + '\n' + slides.flat().join('\n')),
+      versao: Date.now()
+    };
+    await put(novo);
+    return novo;
+  }
+
+  window.PptLib = { list, get, put, add, remove, update, search, extract, boxes, editTexts, replaceFile, exportZip, importZip, usage, persist };
 })();
