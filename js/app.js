@@ -57,7 +57,16 @@
     install: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M12 7v7M9 11l3 3 3-3"/>',
     cross: '<path d="M12 3v18M7 8h10"/>',
     expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
-    folder: '<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'
+    folder: '<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+    undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+    redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
+    alleft: '<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',
+    alcenter: '<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',
+    alright: '<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',
+    aljustify: '<path d="M4 6h16M4 10h16M4 14h16M4 18h16"/>',
+    vatop: '<path d="M5 4h14"/><path d="M12 8v12M8 12l4-4 4 4"/>',
+    vamiddle: '<path d="M5 12h14"/><path d="M12 3v5M9.5 5.5 12 8l2.5-2.5M12 21v-5M9.5 18.5 12 16l2.5 2.5"/>',
+    vabottom: '<path d="M5 20h14"/><path d="M12 4v12M8 12l4 4 4-4"/>'
   };
   const CAT_P = {
     entrada: '<path d="M5 21V11a7 7 0 0 1 14 0v10"/><path d="M3 21h18"/><path d="M12 3v5M9.8 5h4.4"/>',
@@ -1652,7 +1661,7 @@ Regras:
               <button class="btn stack" data-act="show" ${temTexto ? '' : 'disabled'}>${ic('expand')}Apresentar</button>
               <button class="btn stack" data-act="share">${ic('share')}Compartilhar</button>
             </div>
-            ${it.erro && !temTexto ? '' : `<a class="btn gold block" href="#/editor/${encodeURIComponent(it.id)}">${ic('layers')} Editar PowerPoint (fundo, letra, slides)</a>`}
+            ${it.erro && !temTexto ? '' : `<div class="ed-open"><a class="btn gold" href="#/editor/${encodeURIComponent(it.id)}">${ic('layers')} Editar PowerPoint</a><a class="btn ed-nova" href="#/editor/${encodeURIComponent(it.id)}" target="_blank" rel="noopener" title="Abrir o editor numa aba nova do navegador">${ic('share', 'sm')} Nova aba</a></div>`}
             <div class="row3" style="grid-template-columns:1fr 1fr">
               ${temTexto ? `<a class="btn" href="#/ppts/${encodeURIComponent(it.id)}?editar=1">${ic('edit')} Só os textos</a>` : '<span></span>'}
               <label class="btn ppt-up">${ic('upload')} Substituir arquivo<input type="file" accept=".pptx,.ppt,.ppsx,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-powerpoint" hidden data-act="replace"></label>
@@ -1726,185 +1735,61 @@ Regras:
     };
   }
 
-  /* ---------- Editor visual de PowerPoint (fundo, letra, slides) ---------- */
+  /* ---------- Editor de PowerPoint (aba de edição em tela cheia) ---------- */
+  let editorAberto = null;
   views.editor = ([id]) => ({
     tab: '',
-    html: `${topbar('Editar PowerPoint')}<div id="ved"><div class="hint loading"><span class="spin"></span> Preparando os slides…</div></div>`,
+    tela: 'editor',
+    html: `<div id="ved" class="ved"><div class="ved-load"><span class="spin"></span> Abrindo o editor…</div></div>`,
     async after(el) {
-      const SE = window.SlideEditor;
+      document.body.classList.add('e2-mode');
       const box = $('#ved', el);
-      let it = null, deck, nome;
+      const falha = msg => { box.innerHTML = `${topbar('Editar PowerPoint')}${emptyState('slides', 'Não foi possível abrir no editor', esc(msg), `<a class="btn" href="#/ppts">Voltar</a>`)}`; document.body.classList.remove('e2-mode'); };
+      let it = null, deck, nome, ignorados = 0;
+      const t0 = performance.now();
       try {
+        await SlideEditor.loadLibs();
         if (id === 'novo') {
           nome = 'Nova apresentação';
-          deck = { slides: [SE.novoSlide({ texto: 'Título da apresentação' }), SE.novoSlide({ texto: 'Escreva aqui a letra\ndo seu slide' })], imgs: {} };
+          deck = { v: 2, h: 540, imgs: {}, slides: [
+            { bg: { tipo: 'tema', tema: 'noite', escurecer: 0 }, objs: [SlideEditor.novoTexto('Título da apresentação', { pt: 54, y: 190, h: 160 })] },
+            SlideEditor.slideEmBranco({ bg: { tipo: 'tema', tema: 'noite', escurecer: 0 } })
+          ] };
         } else {
           it = await PptLib.get(id);
-          if (!it) { box.innerHTML = emptyState('slides', 'PPT não encontrado', '', `<a class="btn" href="#/ppts">Voltar</a>`); return; }
+          if (!it) return falha('Este PPT não está mais na biblioteca.');
           nome = it.nome;
-          deck = it.deck ? JSON.parse(JSON.stringify(it.deck)) : await SE.deckFromPpt(it, await ensureBlob(it));
-          deck.imgs = deck.imgs || {};
-        }
-      } catch (e) { console.error(e); box.innerHTML = emptyState('slides', 'Não foi possível abrir no editor', esc(e.message), `<a class="btn" href="#/ppts">Voltar</a>`); return; }
-      if (!box.isConnected) return;
-      $('.topbar h1', el).textContent = 'Editar: ' + nome;
-
-      let cur = 0, aba = 'texto', mudou = false;
-      const S = () => deck.slides[cur];
-      const temaIds = ['noite', 'comum', 'roxo', 'festa', 'vermelho', 'aurora', 'preto', 'branco', 'azul'];
-      const temOriginal = deck.slides.some(s => s.bg && s.bg.tipo === 'original');
-      const origImg = (deck.slides.find(s => s.bg && s.bg.tipo === 'original') || {}).bg;
-
-      const thumbs = () => deck.slides.map((s, i) => `<button class="ed-th ${i === cur ? 'on' : ''}" data-th="${i}">${SE.slideHTML(s, 320, deck.imgs)}<span class="num">${i + 1}</span></button>`).join('')
-        + `<button class="ed-th ed-add" data-act="add" aria-label="Novo slide">${ic('plus', 'lg')}</button>`;
-      const seg = (k, v, rotulo) => `<button class="${S()[k] === v ? 'on' : ''}" data-set="${k}" data-v="${v}">${rotulo}</button>`;
-      function painel() {
-        const s = S(), bg = s.bg || {};
-        if (aba === 'texto') return `<div class="field"><label for="edt">Texto do slide ${cur + 1}</label>
-            <textarea id="edt" rows="7" placeholder="Uma linha por linha do slide">${esc(s.texto)}</textarea></div>`;
-        if (aba === 'fundo') return `
-          <div class="ed-lbl">Temas</div>
-          <div class="swatches">
-            ${temOriginal ? `<button class="sw ${bg.tipo === 'original' ? 'on' : ''}" data-bg="original"><i style="${SE.bgCSS(origImg, 160, deck.imgs)}"></i>Original</button>` : ''}
-            ${temaIds.map(t => `<button class="sw ${bg.tipo === 'tema' && bg.tema === t ? 'on' : ''}" data-bg="tema" data-tema="${t}"><i style="${SE.bgCSS({ tipo: 'tema', tema: t }, 160)}"></i>${esc(C.THEMES[t].nome)}</button>`).join('')}
-          </div>
-          <div class="ed-row">
-            <label class="ed-ctl">Cor sólida <input type="color" data-bgcor value="${bg.tipo === 'cor' ? bg.cor : '#0b1630'}"></label>
-            <label class="btn small ppt-up">${ic('image', 'sm')} Usar uma foto<input type="file" accept="image/*" hidden data-bgimg></label>
-          </div>
-          ${bg.tipo === 'imagem' || bg.tipo === 'original' ? `<label class="ed-lbl">Escurecer a imagem</label><input class="range" type="range" min="0" max="0.85" step="0.05" value="${bg.escurecer || 0}" data-escurecer>` : ''}`;
-        return `
-          <div class="ed-row"><label class="ed-ctl">Fonte <select data-fonte>${SE.FONTES.map(f => `<option ${f === s.fonte ? 'selected' : ''} style="font-family:'${f}'">${f}</option>`).join('')}</select></label>
-            <label class="ed-ctl">Cor <input type="color" data-cor value="${s.cor}"></label></div>
-          <div class="ed-lbl">Tamanho: <b data-tamlbl>${s.tamanho ? s.tamanho + ' pt' : 'automático'}</b></div>
-          <div class="ed-row"><input class="range" type="range" min="0" max="80" step="2" value="${s.tamanho || 0}" data-tam><button class="btn small" data-tamauto>Auto</button></div>
-          <div class="ed-row">
-            <div class="seg ed-seg">${seg('negrito', true, '<b>N</b>')}${seg('negrito', false, 'Normal')}</div>
-            <div class="seg ed-seg">${seg('italico', true, '<i>I</i>')}${seg('italico', false, 'Reto')}</div>
-          </div>
-          <div class="ed-lbl">Alinhamento</div>
-          <div class="seg ed-seg3">${seg('alinhar', 'left', 'Esquerda')}${seg('alinhar', 'center', 'Centro')}${seg('alinhar', 'right', 'Direita')}</div>
-          <div class="ed-lbl">Posição</div>
-          <div class="seg ed-seg3">${seg('vertical', 'top', 'Em cima')}${seg('vertical', 'middle', 'Meio')}${seg('vertical', 'bottom', 'Embaixo')}</div>`;
-      }
-      function tela() {
-        box.innerHTML = `
-          <div class="stage ed-stage">${SE.slideHTML(S(), 960, deck.imgs)}</div>
-          <div class="ed-strip">${thumbs()}</div>
-          <div class="ed-bar">
-            <span>Slide <b>${cur + 1}</b> de ${deck.slides.length}</span>
-            <button class="ib" data-act="esq" aria-label="Mover para a esquerda" ${cur ? '' : 'disabled'}>${ic('back', 'sm')}</button>
-            <button class="ib" data-act="dir" aria-label="Mover para a direita" ${cur < deck.slides.length - 1 ? '' : 'disabled'}>${ic('chev', 'sm')}</button>
-            <button class="ib" data-act="dup" aria-label="Duplicar slide">${ic('layers', 'sm')}</button>
-            <button class="ib" data-act="del" aria-label="Apagar slide" ${deck.slides.length > 1 ? '' : 'disabled'}>${ic('trash', 'sm')}</button>
-          </div>
-          <div class="seg ed-tabs">
-            <button class="${aba === 'texto' ? 'on' : ''}" data-aba="texto">Texto</button>
-            <button class="${aba === 'fundo' ? 'on' : ''}" data-aba="fundo">Fundo</button>
-            <button class="${aba === 'letra' ? 'on' : ''}" data-aba="letra">Letra</button>
-          </div>
-          <div class="ed-panel">${painel()}</div>
-          <div class="actions">
-            <button class="btn block" data-act="todos">${ic('check', 'sm')} Aplicar ${aba === 'texto' ? 'fundo e letra' : aba === 'fundo' ? 'este fundo' : 'esta letra'} a todos os slides</button>
-            ${it ? `<button class="btn gold block" data-act="salvar">${ic('check')} Salvar</button>
-            <button class="btn block" data-act="copia">${ic('folder')} Salvar como novo PPT (mantém o original)</button>`
-              : `<button class="btn gold block" data-act="copia">${ic('check')} Salvar na biblioteca</button>`}
-            <button class="btn small block" data-act="apresentar">${ic('expand', 'sm')} Ver em tela cheia</button>
-          </div>`;
-        ligar();
-      }
-      // atualiza só a prévia e a miniatura (enquanto digita/arrasta)
-      function prever() {
-        mudou = true;
-        const st = $('.ed-stage', box); if (st) st.innerHTML = SE.slideHTML(S(), 960, deck.imgs);
-        const th = $(`[data-th="${cur}"]`, box); if (th) th.innerHTML = SE.slideHTML(S(), 320, deck.imgs) + `<span class="num">${cur + 1}</span>`;
-      }
-      function ligar() {
-        $$('[data-th]', box).forEach(b => b.onclick = () => { cur = +b.dataset.th; tela(); });
-        $$('[data-aba]', box).forEach(b => b.onclick = () => { aba = b.dataset.aba; tela(); });
-        const act = (n, fn) => { const b = $(`[data-act="${n}"]`, box); if (b) b.onclick = fn; };
-        act('add', () => { const base = S(); deck.slides.splice(cur + 1, 0, SE.novoSlide({ bg: base.bg, fonte: base.fonte, tamanho: base.tamanho, cor: base.cor, negrito: base.negrito, italico: base.italico, alinhar: base.alinhar, vertical: base.vertical })); cur++; aba = 'texto'; mudou = true; tela(); setTimeout(() => { const t = $('#edt', box); t && t.focus(); }, 50); });
-        act('dup', () => { deck.slides.splice(cur + 1, 0, JSON.parse(JSON.stringify(S()))); cur++; mudou = true; tela(); });
-        act('del', () => { if (deck.slides.length > 1 && confirm(`Apagar o slide ${cur + 1}?`)) { deck.slides.splice(cur, 1); cur = Math.min(cur, deck.slides.length - 1); mudou = true; tela(); } });
-        act('esq', () => { if (cur > 0) { [deck.slides[cur - 1], deck.slides[cur]] = [deck.slides[cur], deck.slides[cur - 1]]; cur--; mudou = true; tela(); } });
-        act('dir', () => { if (cur < deck.slides.length - 1) { [deck.slides[cur + 1], deck.slides[cur]] = [deck.slides[cur], deck.slides[cur + 1]]; cur++; mudou = true; tela(); } });
-        act('todos', () => {
-          const s = S();
-          const campos = aba === 'fundo' ? ['bg'] : aba === 'letra' ? ['fonte', 'tamanho', 'cor', 'negrito', 'italico', 'alinhar', 'vertical'] : ['bg', 'fonte', 'tamanho', 'cor', 'negrito', 'italico', 'alinhar', 'vertical'];
-          deck.slides.forEach(o => campos.forEach(k => { o[k] = JSON.parse(JSON.stringify(s[k])); }));
-          mudou = true; tela(); toast('Aplicado a todos os slides');
-        });
-        act('apresentar', async () => {
-          const imgs = await Promise.all(deck.slides.map(s => SE.slideHTML(s, 1920, deck.imgs)));
-          const ov = document.createElement('div');
-          ov.className = 'show';
-          let i = cur;
-          const draw = () => { ov.innerHTML = imgs[i] + `<div class="hud"><button class="ib" data-x>${ic('x')}</button><span>${i + 1} / ${imgs.length}</span><span style="width:44px"></span></div>`; $('[data-x]', ov).onclick = e => { e.stopPropagation(); ov.remove(); }; };
-          ov.onclick = e => { if (e.target.closest('.hud')) return; if (e.clientX > innerWidth / 3) { if (i < imgs.length - 1) i++; } else if (i > 0) i--; draw(); };
-          document.body.appendChild(ov); draw();
-        });
-        // texto
-        const t = $('#edt', box); if (t) t.oninput = () => { S().texto = t.value; prever(); };
-        // fundo
-        $$('[data-bg]', box).forEach(b => b.onclick = () => {
-          const s = S();
-          if (b.dataset.bg === 'original') s.bg = JSON.parse(JSON.stringify(origImg));
-          else s.bg = { tipo: 'tema', tema: b.dataset.tema, escurecer: 0.35 };
-          s.cor = SE.corParaFundo(s.bg); mudou = true; tela();
-        });
-        const bc = $('[data-bgcor]', box); if (bc) bc.oninput = () => { const s = S(); s.bg = { tipo: 'cor', cor: bc.value }; s.cor = SE.corParaFundo(s.bg); prever(); };
-        if (bc) bc.onchange = () => tela();
-        const bi = $('[data-bgimg]', box); if (bi) bi.onchange = async e => {
-          const f = e.target.files[0]; if (!f) return;
-          try {
-            const url = await PptLib.toDataURL(f);
-            const k = 'u' + Date.now().toString(36);
-            deck.imgs[k] = url;
-            S().bg = { tipo: 'imagem', img: k, escurecer: 0.4 }; S().cor = '#FFFFFF'; mudou = true; tela();
-          } catch { toast('Não consegui abrir essa imagem'); }
-        };
-        const esq = $('[data-escurecer]', box); if (esq) esq.oninput = () => { S().bg.escurecer = +esq.value; prever(); };
-        // letra
-        const fo = $('[data-fonte]', box); if (fo) fo.onchange = () => { S().fonte = fo.value; prever(); };
-        const co = $('[data-cor]', box); if (co) co.oninput = () => { S().cor = co.value; prever(); };
-        const tam = $('[data-tam]', box), tl = $('[data-tamlbl]', box);
-        if (tam) tam.oninput = () => { S().tamanho = +tam.value; tl.textContent = S().tamanho ? S().tamanho + ' pt' : 'automático'; prever(); };
-        act('tamauto', () => { S().tamanho = 0; tela(); });
-        $$('[data-set]', box).forEach(b => b.onclick = () => {
-          const v = b.dataset.v === 'true' ? true : b.dataset.v === 'false' ? false : b.dataset.v;
-          S()[b.dataset.set] = v; mudou = true; tela();
-        });
-        // salvar
-        const salvar = async (comoNovo, btn) => {
-          const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Gerando o PowerPoint…';
-          try {
-            const blob = await SE.toPptx(deck, nome);
-            await nuvemCheck();
-            let alvo;
-            if (comoNovo || !it) {
-              const base = it ? nome + ' (editado)' : nome;
-              const meta = await PptLib.add(new File([blob], base + '.pptx', { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }));
-              alvo = meta.id;
-            } else {
-              await PptLib.replaceFile(it.id, blob, it.arquivo && /\.pptx$/i.test(it.arquivo) ? it.arquivo : nome + '.pptx');
-              alvo = it.id;
-            }
-            await PptLib.update(alvo, { deck });
-            let msg = comoNovo || !it ? 'Novo PPT salvo na biblioteca' : 'PowerPoint salvo';
-            if (online()) { try { if (await pushNuvem(alvo)) msg += ' e enviado para todos'; } catch (e) { msg += ' (só neste aparelho: ' + e.message + ')'; } }
-            mudou = false; toast(msg);
-            go('#/ppts/' + encodeURIComponent(alvo), true);
-          } catch (e) {
-            console.error(e); toast(e.message || 'Não consegui salvar'); btn.disabled = false; btn.innerHTML = old;
+          if (it.deck && it.deck.v === 2) deck = it.deck;               // já editado antes: abre na hora
+          else {
+            if (!/\.(pptx|ppsx)$/i.test(it.arquivo || '') && !/presentationml/.test(it.tipo || '')) return falha('O editor abre arquivos .pptx. Salve este PPT como .pptx no PowerPoint e envie de novo.');
+            ({ deck, ignorados } = await SlideEditor.fromPptx(await ensureBlob(it)));
           }
-        };
-        act('salvar', e => salvar(false, e.currentTarget));
-        act('copia', e => salvar(true, e.currentTarget));
-      }
-      tela();
-      // aviso ao sair sem salvar
-      const back = $('[data-act="back"]', el);
-      if (back) back.onclick = () => { if (!mudou || confirm('Sair sem salvar as alterações?')) history.length > 1 ? history.back() : go('#/ppts'); };
+        }
+      } catch (e) { console.error(e); return falha(e.message); }
+      if (!box.isConnected) return;
+      console.info(`Editor aberto em ${Math.round(performance.now() - t0)} ms`);
+      editorAberto = SlideEditorUI.mount(box, {
+        deck, nome, toast, ic,
+        onClose: () => { editorAberto = null; document.body.classList.remove('e2-mode'); history.length > 1 ? history.back() : go(it ? '#/ppts/' + encodeURIComponent(it.id) : '#/ppts'); },
+        onSave: async (d, comoNovo) => {
+          const blob = await SlideEditor.toPptx(d, nome);
+          await nuvemCheck();
+          let alvo;
+          if (comoNovo || !it) {
+            const meta = await PptLib.add(new File([blob], (it ? nome + ' (editado)' : nome) + '.pptx', { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }));
+            alvo = meta.id;
+          } else {
+            await PptLib.replaceFile(it.id, blob, /\.pptx$/i.test(it.arquivo || '') ? it.arquivo : nome + '.pptx');
+            alvo = it.id;
+          }
+          await PptLib.update(alvo, { deck: d });
+          let msg = comoNovo || !it ? 'Salvo como um PPT novo na biblioteca' : 'PowerPoint salvo';
+          if (online()) { try { if (await pushNuvem(alvo)) msg += ' e enviado para todos'; } catch (e) { msg += ' (só neste aparelho)'; } }
+          toast(msg);
+          if (!it || comoNovo) { it = await PptLib.get(alvo); nome = it.nome; history.replaceState(null, '', '#/editor/' + encodeURIComponent(alvo)); }
+        }
+      });
+      if (ignorados) toast(`${ignorados} elemento${ignorados > 1 ? 's' : ''} (vídeo, tabela ou gráfico) não ${ignorados > 1 ? 'podem' : 'pode'} ser editado${ignorados > 1 ? 's' : ''} e ${ignorados > 1 ? 'ficaram' : 'ficou'} de fora`);
     }
   });
 
@@ -2156,6 +2041,9 @@ Regras:
   let lastName = '';
   function render() {
     const { name, args, q } = parseHash();
+    // saindo do editor: desliga atalhos e volta a mostrar a barra do app
+    if (editorAberto) { editorAberto.destroy(); editorAberto = null; }
+    document.body.classList.remove('e2-mode');
     const fn = views[name] || views.inicio;
     const v = fn(args, q);
     const el = $('#view');
@@ -2178,7 +2066,14 @@ Regras:
     document.title = name === 'inicio' ? 'Cantai ao Senhor' : `${($('h1', el) || $('h2', el) || {}).textContent || ''} · Cantai ao Senhor`;
   }
 
-  window.addEventListener('hashchange', render);
+  window.addEventListener('hashchange', e => {
+    // sair do editor com alterações não salvas: pergunta antes
+    if (editorAberto && editorAberto.sujo && !/#\/editor\//.test(location.hash) && !confirm('Sair do editor sem salvar as alterações?')) {
+      history.pushState(null, '', e.oldURL.slice(e.oldURL.indexOf('#')));
+      return;
+    }
+    render();
+  });
   render();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
