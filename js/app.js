@@ -285,6 +285,21 @@
       <span class="body"><b>${esc(s.titulo)}${tags}</b><span class="sub">${sub}</span>${extra}</span>
       ${ic('chev', 'sm chev')}</a></li>`;
   }
+  // linha da busca: toque no nome abre normal; botões abrem direto em Letra ou Cifra
+  function searchRow(s, extra = '', attrs = '') {
+    const c = catOf(s.categoria);
+    const href = '#/musica/' + encodeURIComponent(s.id);
+    const tags = (songHasChords(s) ? `<span class="badge">CIFRA</span>` : '') + (s.idioma === 'la' ? `<span class="badge">LATIM</span>` : '');
+    const sub = isWeb(s) ? esc(s.autor || 'Internet') + (s.album && norm(s.album) !== norm(s.titulo) ? ' · ' + esc(s.album) : '')
+      : esc(c.nome) + (s.autor ? ' · ' + esc(s.autor) : '');
+    return `<li class="srow"><a class="row" href="${href}" ${attrs}>
+      <span class="thumb ${thumbCls(s)}">${CROSS_THUMB}</span>
+      <span class="body"><b>${esc(s.titulo)}${tags}</b><span class="sub">${sub}</span>${extra}</span></a>
+      <span class="lc">
+        <a class="lc-b" href="${href}?modo=letra" ${attrs} aria-label="Abrir a letra de ${esc(s.titulo)}">Letra</a>
+        <a class="lc-b ${songHasChords(s) ? 'has' : ''}" href="${href}?modo=cifra" ${attrs} aria-label="Abrir a cifra de ${esc(s.titulo)}">Cifra</a>
+      </span></li>`;
+  }
   function emptyState(icon, title, text, action = '') {
     return `<div class="empty">${ic(icon)}<b>${esc(title)}</b><p>${text}</p>${action}</div>`;
   }
@@ -342,7 +357,7 @@
       <div class="chips" role="tablist">${chips.map(([k, l]) => `<button class="chip ${filtro === k ? 'on' : ''}" data-filter="${k}" role="tab" aria-selected="${filtro === k}">${l}</button>`).join('')}</div>
       ${!termo ? `<div class="hint">Digite o nome ou um trecho de <b>qualquer música</b>: buscamos no acervo e na internet.</div>` : ''}
       ${res.length ? `<div class="sec-title">${termo ? 'No acervo' : 'Acervo'} <span>${res.length}</span></div>
-        <ul class="list">${res.map(r => songRow(r.s, r.snip ? `<span class="snip">…${r.snip}…</span>` : '')).join('')}</ul>` : ''}
+        <ul class="list">${res.map(r => searchRow(r.s, r.snip ? `<span class="snip">…${r.snip}…</span>` : '')).join('')}</ul>` : ''}
       ${termo ? '<div id="pptres"></div>' : ''}
       ${termo && webOk ? `<div class="sec-title">Na internet <span class="src-tag">LRCLIB</span></div><div id="webres"><div class="hint loading"><span class="spin"></span> Buscando letras…</div></div>` : ''}
       ${termo && !webOk && !res.length ? emptyState('search', 'Nada encontrado', 'Tente outra palavra ou cadastre a música você mesmo.', `<a class="btn gold" href="#/nova">${ic('plus')} Adicionar música</a>`) : ''}`,
@@ -365,7 +380,7 @@
               : emptyState('search', 'Nada encontrado', 'Confira a grafia, tente o nome do cantor junto (ex.: “segura na mão de Deus marcelo rossi”) ou cadastre a música.', `<a class="btn gold" href="#/nova">${ic('plus')} Adicionar música</a>`);
             return;
           }
-          box.innerHTML = `<ul class="list">${list.map((s, i) => songRow(s, '', `data-web="${i}"`)).join('')}</ul>`;
+          box.innerHTML = `<ul class="list">${list.map((s, i) => searchRow(s, '', `data-web="${i}"`)).join('')}</ul>`;
           $$('[data-web]', box).forEach(a => a.addEventListener('click', () => saveWebSong(list[Number(a.dataset.web)])));
         }).catch(() => {
           if (!box.isConnected) return;
@@ -760,7 +775,7 @@ Regras:
     }
   }
 
-  views.musica = ([id]) => {
+  views.musica = ([id], q) => {
     const s = getSong(id);
     if (!s && String(id).startsWith('web-')) {
       return {
@@ -776,7 +791,9 @@ Regras:
     pushHist(s.id);
     const chords = songHasChords(s);
     const set = settings();
-    let mode = chords ? (set.modo || 'cifra') : 'letra';
+    const pedido = q && q.get('modo');
+    let mode = pedido === 'letra' || pedido === 'cifra' ? pedido : chords ? (set.modo || 'cifra') : 'letra';
+    if (pedido && chords) setSettings({ modo: mode });
     let st = store.get('tr:' + s.id, 0);
     const c = catOf(s.categoria);
 

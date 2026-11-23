@@ -76,3 +76,5 @@ O acervo contém apenas **textos em domínio público** (hinos latinos e cantos 
 ## Licença
 
 Código sob licença MIT.
+
+_Teste de push: 22/11/2026._

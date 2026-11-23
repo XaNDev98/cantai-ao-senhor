@@ -272,6 +272,12 @@ svg.i.fill { fill: currentColor; }
 .row .snip { display: block; color: #c4cbe0; font-size: 13px; margin-top: 4px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row mark { background: rgba(214, 178, 110, .3); color: inherit; border-radius: 3px; padding: 0 1px; }
 .row .chev { color: var(--muted-2); }
+.srow { display: flex; align-items: center; border-bottom: 1px solid var(--line-soft); }
+.srow .row { flex: 1; min-width: 0; border-bottom: 0; padding-right: 8px; }
+.srow .lc { display: flex; gap: 6px; padding-right: 14px; flex-shrink: 0; }
+.srow .lc-b { display: inline-flex; align-items: center; height: 32px; padding: 0 11px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--muted); background: var(--card); border: 1px solid var(--line-soft); }
+.srow .lc-b.has { color: var(--gold-2); border-color: var(--line); }
+.srow .lc-b:active { background: var(--gold); color: #1a1406; }
 .badge { display: inline-block; font-size: 10.5px; font-weight: 600; letter-spacing: .04em; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); color: var(--gold); margin-left: 6px; vertical-align: 1px; }
 
 .thumb {
