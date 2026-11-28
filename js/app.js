@@ -190,6 +190,13 @@
     { id: 'google', nome: 'Google', url: s => 'https://www.google.com/search?q=' + encodeURIComponent(`cifra ${cleanTitle(s.titulo)} ${cleanArtist(s.autor)}`.trim()) }
   ];
   const chordSearchURL = s => CHORD_SITES[0].url(s);
+  // vídeo da música: abre a busca do YouTube (sem chave de API, sem rastreio no app)
+  // no acervo o "autor" é descrição (Acervo, Hino tradicional…), então só entra o nome de artista real
+  const videoURL = s => {
+    const artista = (isWeb(s) || isUser(s)) && !/acervo|tradicional|missal/i.test(s.autor || '') ? cleanArtist(s.autor) : '';
+    const extra = s.idioma === 'la' ? 'canto gregoriano' : artista ? '' : 'música católica';
+    return 'https://www.youtube.com/results?search_query=' + encodeURIComponent([cleanTitle(s.titulo), artista, extra].filter(Boolean).join(' '));
+  };
   const songHasChords = s => C.hasChords(s.texto);
 
   const favs = () => store.get('favs', []);
@@ -298,6 +305,7 @@
       <span class="lc">
         <a class="lc-b" href="${href}?modo=letra" ${attrs} aria-label="Abrir a letra de ${esc(s.titulo)}">Letra</a>
         <a class="lc-b ${songHasChords(s) ? 'has' : ''}" href="${href}?modo=cifra" ${attrs} aria-label="Abrir a cifra de ${esc(s.titulo)}">Cifra</a>
+        <a class="lc-b vid" href="${videoURL(s)}" target="_blank" rel="noopener" aria-label="Ver vídeo de ${esc(s.titulo)} no YouTube">${ic('play', 'sm')}</a>
       </span></li>`;
   }
   function emptyState(icon, title, text, action = '') {
@@ -313,7 +321,7 @@
     return {
       tab: 'inicio',
       html: `<section class="hero">
-        <div class="hero-art">${HERO_SVG}</div>
+        <div class="hero-art photo" role="img" aria-label="Interior da Catedral Nossa Senhora dos Prazeres"></div>
         <a class="ib hero-gear" href="#/mais" aria-label="Configurações">${ic('gear')}</a>
         <div class="hero-in">
           <h1 class="brand"><span>Cantai ao</span><em>Senhor</em></h1>
@@ -822,12 +830,13 @@ Regras:
 
     return {
       tab: '',
-      html: `<div class="song-hero ${s.idioma === 'la' ? 'lat' : ''}">${SONG_ART}
+      html: `<div class="song-hero photo ${s.idioma === 'la' ? 'lat' : ''}"><div class="art-photo" aria-hidden="true"></div>
         <div class="tb"><button class="ib" data-act="back" aria-label="Voltar">${ic('back')}</button><a class="ib" href="#/" aria-label="Início">${ic('home')}</a></div>
         <div class="meta"><h2>${esc(s.titulo)}</h2><span>${isWeb(s) ? esc(s.autor || 'Internet') : esc(c.nome)}${s.idioma === 'la' ? '<span class="dot">•</span>Latim' : ''}</span></div>
       </div>
       <div id="songbody">${body()}</div>
       <div class="actions">
+        <a class="video-card" href="${videoURL(s)}" target="_blank" rel="noopener"><span class="vc-ico">${ic('play')}</span><span><b>Ouvir a música</b><small>Vídeos de “${esc(cleanTitle(s.titulo))}” no YouTube</small></span>${ic('chev', 'sm')}</a>
         <a class="btn gold block" href="#/ppt?src=m&id=${encodeURIComponent(s.id)}">${ic('slides')} Converter para PPT</a>
         <div class="row3">
           <button class="btn stack" data-act="show">${ic('expand')}Apresentar</button>

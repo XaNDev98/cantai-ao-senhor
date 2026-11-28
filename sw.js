@@ -1,9 +1,10 @@
 /* Service worker: o app funciona sem internet depois da primeira visita. */
-const VERSION = 'cantai-v19';
+const VERSION = 'cantai-v20';
 const SHELL = [
   './',
   'index.html',
   'css/app.css',
+  'img/catedral.jpg',
   'js/songs.js',
   'js/slides.js',
   'js/pptlib.js',
