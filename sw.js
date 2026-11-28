@@ -1,5 +1,5 @@
 /* Service worker: o app funciona sem internet depois da primeira visita. */
-const VERSION = 'cantai-v20';
+const VERSION = 'cantai-v21';
 const SHELL = [
   './',
   'index.html',

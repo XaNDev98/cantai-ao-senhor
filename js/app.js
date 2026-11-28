@@ -57,6 +57,7 @@
     install: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M12 7v7M9 11l3 3 3-3"/>',
     cross: '<path d="M12 3v18M7 8h10"/>',
     expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+    book: '<path d="M12 6.5C10 5 7 4.5 3.5 5v13c3.5-.5 6.5 0 8.5 1.5 2-1.5 5-2 8.5-1.5V5C17 4.5 14 5 12 6.5z"/><path d="M12 6.5v13"/>',
     folder: '<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
     redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
@@ -340,6 +341,7 @@
         <a class="tile" href="#/repertorio">${ic('list')}<span><strong>Repertório</strong><small>Monte a missa</small></span>${n ? `<span class="count">${n}</span>` : ''}</a>
         <a class="tile" href="#/favoritos">${ic('star')}<span><strong>Favoritas</strong><small>${favs().length || 'Nenhuma'} ${favs().length === 1 ? 'música' : favs().length ? 'músicas' : 'ainda'}</small></span></a>
         <a class="tile wide" href="#/ppts"><span class="cat-ico">${catIc('nota')}</span><span><strong>Meus PPTs</strong><small>Guarde os PPTs prontos e use quando quiser</small></span>${ic('chev', 'sm')}</a>
+        <a class="tile wide" href="#/liturgia"><span class="cat-ico">${ic('book')}</span><span><strong>Liturgia do dia</strong><small>Leituras, salmo e evangelho de hoje</small></span>${ic('chev', 'sm')}</a>
         <a class="tile wide" href="#/oracoes"><span class="cat-ico">${catIc('calice')}</span><span><strong>Orações Eucarísticas</strong><small>Guarde as 14 no app e leia sem internet</small></span>${ic('chev', 'sm')}</a>
       </section>
       ${h.length ? `<div class="sec-title">Vistas recentemente <a href="#/historico">Ver tudo</a></div>
@@ -1377,6 +1379,117 @@ Regras:
         };
         const d = $('[data-act="oedel"]', el);
         if (d) d.onclick = () => { if (confirm(`Apagar a ${oe.nome} deste aparelho?`)) { store.set('oe:' + oe.id, ''); go('#/oracoes/' + oe.id, true); } };
+      }
+    };
+  };
+
+  /* ---------- Liturgia diária ----------
+   * Leituras do dia pela API aberta liturgia.up.railway.app (textos litúrgicos da CNBB).
+   * Cada dia aberto fica guardado no aparelho e pode ser lido sem internet depois. */
+  const LIT_API = 'https://liturgia.up.railway.app/v2/';
+  const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const SEMANA = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+  const pad2 = n => String(n).padStart(2, '0');
+  const isoDate = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const parseISO = t => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(t || ''); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null; };
+  const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  const LIT_COR = { verde: '#3f9b5a', roxo: '#7b4fb0', branco: '#f3efe4', vermelho: '#c8423b', rosa: '#e48aac', preto: '#222' };
+  const litMem = new Map();
+  async function litGet(iso) {
+    if (litMem.has(iso)) return litMem.get(iso);
+    const cache = store.get('lit', {});
+    const d = parseISO(iso);
+    try {
+      const r = await fetch(`${LIT_API}?dia=${d.getDate()}&mes=${d.getMonth() + 1}&ano=${d.getFullYear()}`);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (!j || !j.leituras) throw new Error('Resposta inesperada');
+      litMem.set(iso, j);
+      cache[iso] = j;
+      const keys = Object.keys(cache).sort();
+      while (keys.length > 14) delete cache[keys.shift()];
+      store.set('lit', cache);
+      return j;
+    } catch (e) {
+      if (cache[iso]) return cache[iso];
+      throw e;
+    }
+  }
+  // números de versículo colados ao texto ("17Como") viram números pequenos
+  const litText = t => esc(t || '').replace(/(^|[\s(“"])(\d{1,3})(?=[A-Za-zÀ-ú“"‘'«–—])/g, '$1<sup>$2</sup>');
+  function litReading(kind, x) {
+    if (!x) return '';
+    if (kind === 'salmo') {
+      const linhas = String(x.texto || '').split(/\n+/).map(l => l.trim()).filter(Boolean);
+      return `<div class="lit-h"><b>Salmo responsorial</b><span>${esc(x.referencia || '')}</span></div>
+        ${x.refrao ? `<p class="lit-refrao"><span>R.</span> ${esc(x.refrao)}</p>` : ''}
+        ${linhas.map(l => `<p class="lit-verso">${litText(l)}</p>`).join('')}`;
+    }
+    const paras = String(x.texto || '').split(/\n+/).map(l => l.trim()).filter(Boolean);
+    const fim = kind === 'evangelho' ? 'Palavra da Salvação.' : 'Palavra do Senhor.';
+    const resp = kind === 'evangelho' ? 'Glória a vós, Senhor.' : 'Graças a Deus.';
+    return `<div class="lit-h"><b>${esc(x.titulo || '')}</b><span>${esc(x.referencia || '')}</span></div>
+      ${paras.map(l => `<p>${litText(l)}</p>`).join('')}
+      <p class="lit-fim">— ${fim} <span>— ${resp}</span></p>`;
+  }
+
+  views.liturgia = (_, q) => {
+    const hoje = new Date();
+    const dia = parseISO(q.get('d')) || new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+    const iso = isoDate(dia);
+    const ehHoje = iso === isoDate(hoje);
+    const rotulo = `${ehHoje ? 'Hoje, ' : ''}${SEMANA[dia.getDay()]}${ehHoje ? '' : ','} ${dia.getDate()} de ${MESES[dia.getMonth()]}`;
+    let aba = q.get('l') || 'primeira';
+    return {
+      tab: 'liturgia',
+      html: `${topbar('Liturgia diária', { back: false })}
+      <div class="lit-nav">
+        <a class="ib" href="#/liturgia?d=${isoDate(addDays(dia, -1))}" aria-label="Dia anterior">${ic('back')}</a>
+        <label class="lit-date"><span>${esc(rotulo)}</span><input type="date" value="${iso}" aria-label="Escolher data"></label>
+        <a class="ib flip" href="#/liturgia?d=${isoDate(addDays(dia, 1))}" aria-label="Próximo dia">${ic('back')}</a>
+      </div>
+      ${ehHoje ? '' : `<div class="lit-today"><a href="#/liturgia">Voltar para hoje</a></div>`}
+      <div id="litbody"><div class="empty"><span class="spin" style="display:inline-block;color:var(--gold)"></span><p style="margin-top:14px">Carregando as leituras…</p></div></div>`,
+      after(el) {
+        const inp = $('.lit-date input', el);
+        inp.onchange = () => { if (inp.value) go('#/liturgia?d=' + inp.value, true); };
+        const box = $('#litbody', el);
+        litGet(iso).then(j => {
+          if (!box.isConnected) return;
+          const L = j.leituras;
+          const tabs = [['primeira', '1ª Leitura', L.primeiraLeitura && L.primeiraLeitura[0]], ['salmo', 'Salmo', L.salmo && L.salmo[0]],
+            ['segunda', '2ª Leitura', L.segundaLeitura && L.segundaLeitura[0]], ['evangelho', 'Evangelho', L.evangelho && L.evangelho[0]]].filter(t => t[2]);
+          if (!tabs.some(t => t[0] === aba)) aba = tabs.length ? tabs[0][0] : '';
+          const cor = String(j.cor || '').toLowerCase().split(/\s|\//)[0];
+          const draw = () => {
+            const t = tabs.find(x => x[0] === aba);
+            box.innerHTML = `<div class="lit-card">
+                <span class="lit-cor" style="background:${LIT_COR[cor] || 'var(--gold)'}" title="Cor litúrgica"></span>
+                <div><b>${esc(j.liturgia || '')}</b><small>Cor litúrgica: ${esc(j.cor || '—')}</small></div>
+              </div>
+              <div class="chips lit-tabs" role="tablist">${tabs.map(([k, l]) => `<button class="chip ${k === aba ? 'on' : ''}" data-lit="${k}" role="tab" aria-selected="${k === aba}">${l}</button>`).join('')}</div>
+              <div class="tools"><div class="tool"><button data-fs="-1" aria-label="Diminuir letra">A−</button><button data-fs="1" aria-label="Aumentar letra">A+</button></div>
+                <span class="sp"></span>
+                <div class="tool icon"><button data-act="paper" aria-label="Alternar fundo da leitura">${ic(settings().papel === 'escuro' ? 'sun' : 'moon', 'sm')}</button></div>
+                <div class="tool icon"><button data-act="litshare" aria-label="Compartilhar">${ic('share', 'sm')}</button></div></div>
+              <article class="paper lit ${settings().papel === 'escuro' ? 'dark' : ''}" style="--fs:${settings().fs}px">
+                ${t ? litReading(t[0] === 'segunda' || t[0] === 'primeira' ? 'leitura' : t[0], t[2]) : '<p>Leituras indisponíveis para este dia.</p>'}
+              </article>
+              <p class="lit-src">Textos litúrgicos: CNBB · via liturgia.up.railway.app</p>`;
+            $$('[data-lit]', box).forEach(b => b.onclick = () => { aba = b.dataset.lit; history.replaceState(null, '', `#/liturgia?d=${iso}&l=${aba}`); draw(); });
+            $$('[data-fs]', box).forEach(b => b.onclick = () => { const fs = Math.min(30, Math.max(14, settings().fs + Number(b.dataset.fs))); setSettings({ fs }); $('.paper', box).style.setProperty('--fs', fs + 'px'); });
+            $('[data-act="paper"]', box).onclick = () => { setSettings({ papel: settings().papel === 'escuro' ? 'claro' : 'escuro' }); draw(); };
+            $('[data-act="litshare"]', box).onclick = async () => {
+              const txt = `${j.liturgia}\n${t ? (t[2].titulo || 'Salmo') + ' (' + t[2].referencia + ')\n\n' + (t[2].refrao ? 'R. ' + t[2].refrao + '\n\n' : '') + t[2].texto : ''}`;
+              try { if (navigator.share) await navigator.share({ title: j.liturgia, text: txt }); else { await navigator.clipboard.writeText(txt); toast('Leitura copiada'); } } catch { /* cancelado */ }
+            };
+          };
+          draw();
+        }).catch(() => {
+          if (!box.isConnected) return;
+          box.innerHTML = emptyState('info', 'Não foi possível carregar as leituras', navigator.onLine === false ? 'Sem conexão com a internet. Os dias que você já abriu ficam guardados para ler offline.' : 'O serviço de leituras não respondeu agora. Tente de novo em instantes.', `<button class="btn" data-act="retry">Tentar de novo</button>`);
+          $('[data-act="retry"]', box).onclick = () => render();
+        });
       }
     };
   };
